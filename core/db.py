@@ -553,10 +553,12 @@ def _account_matches_plan_filter(row: dict, plan_filter: str | None = None) -> b
 
 
 def _account_matches_trial_filter(row: dict, trial_filter: str | None = None) -> bool:
-    """按套餐试用资格过滤；unknown 表示尚未取得明确查询结果。"""
+    """按套餐试用资格过滤；试用资格只适用于 Free 套餐。"""
     f = str(trial_filter or "").strip().lower()
     if not f or f in {"all", "any"}:
         return True
+    plan = str(row.get("current_plan_type") or row.get("plan_type") or "").strip().lower()
+    is_free = plan == "free"
     value = row.get("plus_trial_eligible")
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -569,11 +571,11 @@ def _account_matches_trial_filter(row: dict, trial_filter: str | None = None) ->
     elif not isinstance(value, bool):
         value = None
     if f in {"eligible", "trial", "可试用"}:
-        return value is True
+        return is_free and value is True
     if f in {"ineligible", "not_eligible", "unavailable", "不可试用"}:
-        return value is False
+        return is_free and value is False
     if f in {"unknown", "unchecked", "未查询"}:
-        return value is None
+        return (not plan or is_free) and value is None
     return True
 
 

@@ -177,11 +177,13 @@ class ProxyUtilsTests(unittest.TestCase):
         self.assertEqual(reason, "session_ok:http_200")
 
     def test_account_trial_filter_distinguishes_eligible_ineligible_and_unknown(self):
-        self.assertTrue(db._account_matches_trial_filter({"plus_trial_eligible": True}, "eligible"))
-        self.assertFalse(db._account_matches_trial_filter({"plus_trial_eligible": False}, "eligible"))
-        self.assertTrue(db._account_matches_trial_filter({"plus_trial_eligible": False}, "ineligible"))
+        self.assertTrue(db._account_matches_trial_filter({"current_plan_type": "free", "plus_trial_eligible": True}, "eligible"))
+        self.assertFalse(db._account_matches_trial_filter({"current_plan_type": "free", "plus_trial_eligible": False}, "eligible"))
+        self.assertTrue(db._account_matches_trial_filter({"current_plan_type": "free", "plus_trial_eligible": False}, "ineligible"))
+        self.assertFalse(db._account_matches_trial_filter({"current_plan_type": "plus", "plus_trial_eligible": False}, "ineligible"))
+        self.assertFalse(db._account_matches_trial_filter({"current_plan_type": "plus"}, "unknown"))
         self.assertTrue(db._account_matches_trial_filter({}, "unknown"))
-        self.assertFalse(db._account_matches_trial_filter({"plus_trial_eligible": "yes"}, "unknown"))
+        self.assertFalse(db._account_matches_trial_filter({"current_plan_type": "free", "plus_trial_eligible": "yes"}, "unknown"))
 
 
 if __name__ == "__main__":
