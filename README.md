@@ -381,7 +381,7 @@ hostname:port:username:password
 hostname:port@username:password
 ```
 
-无协议格式默认按 SOCKS5 处理；如果代理服务商的该端口是 HTTP，请在行首显式添加 `http://`。
+无协议格式默认按 SOCKS5 处理；`http://`、`socks5://`、`socks5h://` 可加在任意一种格式前面，用于明确代理协议。
 
 Roxy 一号一环境开启 `ROXY_CREATE_USE_PROXY_POOL=True` 时，会从这里随机取代理写入 Roxy Profile。
 

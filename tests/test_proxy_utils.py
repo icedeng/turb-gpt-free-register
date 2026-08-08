@@ -28,6 +28,14 @@ class ProxyUtilsTests(unittest.TestCase):
                 "http://user:pass@proxy.example:8080",
             ),
             (
+                "http://proxy.example:8080:user:pass",
+                "http://user:pass@proxy.example:8080",
+            ),
+            (
+                "socks5://user:pass:proxy.example:1080",
+                "socks5://user:pass@proxy.example:1080",
+            ),
+            (
                 "socks5h://proxy.example:1080",
                 "socks5h://proxy.example:1080",
             ),

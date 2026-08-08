@@ -5,6 +5,9 @@ from __future__ import annotations
 import ipaddress
 
 
+_SUPPORTED_SCHEMES = {"http", "https", "socks5", "socks5h"}
+
+
 def _is_port(value: str) -> bool:
     if not value.isdigit():
         return False
@@ -32,8 +35,16 @@ def normalize_proxy_url(proxy_url: str, *, default_scheme: str = "socks5") -> st
     无协议格式默认补充 SOCKS5；空值保持为空。
     """
     text = str(proxy_url or "").strip()
-    if not text or "://" in text:
+    if not text:
         return text
+    if "://" in text:
+        prefix, payload = text.split("://", 1)
+        if prefix.lower() not in _SUPPORTED_SCHEMES:
+            return text
+        default_scheme = prefix.lower()
+        text = payload.strip()
+        if not text:
+            return ""
     if text.startswith("//"):
         return f"{default_scheme}:{text}"
 

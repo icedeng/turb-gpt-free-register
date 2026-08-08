@@ -446,7 +446,7 @@ EDITABLE_FIELDS = [
     # ---- 代理池 ----
     {
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "支持 socks5://username:password@hostname:port、username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://，HTTP 代理请显式加 http://",
+        "label": "代理池(每行一个)", "help": "支持 socks5:// 或 http:// + username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://",
     },
     {
         "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",
