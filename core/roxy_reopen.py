@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 from core.roxybrowser_client import RoxyBrowserClient, RoxyOpenResult
@@ -13,7 +15,85 @@ from core.roxybrowser_client import RoxyBrowserClient, RoxyOpenResult
 logger = logging.getLogger(__name__)
 
 _CHATGPT_URL = "https://chatgpt.com/"
+_LOG_DIR = Path(__file__).resolve().parent.parent / "注册日志"
 _ACTIVE_DRIVERS: dict[str, object] = {}
+_RUNNING: set[str] = set()
+_RUNNING_LOCK = threading.Lock()
+
+# /browser/detail 返回的字段中，以下字段可直接用于 /browser/create。
+# 其余字段是只读状态（dirId、时间、打开状态等），不能回传创建接口。
+_PROFILE_CREATE_FIELDS = (
+    "windowName", "coreVersion", "coreType", "os", "osVersion", "userAgent",
+    "cookie", "searchEngine", "labelIds", "windowPlatformList", "defaultOpenUrl",
+    "windowRemark", "projectId", "proxyInfo", "fingerInfo",
+    "position", "openWidth", "openHeight", "openBookmarks", "positionSwitch",
+    "windowRatioPosition", "isDisplayName", "syncBookmark", "syncHistory", "syncTab",
+    "syncCookie", "syncExtensions", "syncPassword", "syncIndexedDb", "syncLocalStorage",
+    "clearCacheFile", "clearCookie", "clearLocalStorage", "randomFingerprint",
+    "forbidSavePassword", "stopOpenNet", "stopOpenIP", "stopOpenPosition", "openWorkbench",
+    "resolutionType", "resolutionX", "resolutionY", "fontType", "webRTC", "webGL",
+    "webGLInfo", "webGLManufacturer", "webGLRender", "webGpu", "canvas", "audioContext",
+    "speechVoices", "doNotTrack", "clientRects", "deviceInfo", "deviceNameSwitch", "macInfo",
+    "hardwareConcurrent", "deviceMemory", "disableSsl", "disableSslList", "portScanProtect",
+    "portScanList", "useGpu", "sandboxPermission",
+)
+_PROXY_CREATE_FIELDS = (
+    "moduleId", "proxyMethod", "proxyCategory", "ipType", "protocol", "host", "port",
+    "proxyUserName", "proxyPassword", "refreshUrl", "checkChannel",
+)
+
+
+def _email_key(email: str) -> str:
+    return str(email or "").strip().lower()
+
+
+def log_path(email: str) -> Path:
+    safe = str(email or "").replace("/", "_").replace("\\", "_").replace(":", "_")
+    return _LOG_DIR / f"roxy-reopen-{safe}.log"
+
+
+def is_reopening(email: str) -> bool:
+    with _RUNNING_LOCK:
+        return _email_key(email) in _RUNNING
+
+
+def _begin_reopen_log(email: str) -> tuple[str, logging.FileHandler | None]:
+    key = _email_key(email)
+    if not key:
+        raise RuntimeError("账号邮箱为空，无法创建 Roxy 运行日志")
+    with _RUNNING_LOCK:
+        if key in _RUNNING:
+            raise RuntimeError("该账号正在重新打开 RoxyBrowser，请先查看当前运行日志")
+        _RUNNING.add(key)
+    handler: logging.FileHandler | None = None
+    try:
+        path = log_path(email)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        handler = logging.FileHandler(str(path), encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+        thread_name = threading.current_thread().name
+        handler.addFilter(lambda record: record.threadName == thread_name)
+        logging.getLogger().addHandler(handler)
+    except Exception:
+        # 日志文件失败不应阻断 Roxy 操作；系统日志仍会保留同一条记录。
+        logging.getLogger(__name__).exception("创建 Roxy 重新打开日志失败：email=%s", email)
+    return key, handler
+
+
+def _finish_reopen_log(key: str, handler: logging.FileHandler | None) -> None:
+    if handler is not None:
+        try:
+            logging.getLogger().removeHandler(handler)
+            handler.close()
+        except Exception:
+            pass
+    with _RUNNING_LOCK:
+        _RUNNING.discard(key)
 
 
 def capture_auth_state(driver) -> dict:
@@ -100,6 +180,38 @@ def _extra_from_account(account: dict) -> dict:
     except Exception:
         extra = {}
     return extra if isinstance(extra, dict) else {}
+
+
+def _profile_detail_from_account(account: dict) -> dict:
+    extra = _extra_from_account(account)
+    roxy = extra.get("roxybrowser")
+    if not isinstance(roxy, dict):
+        return {}
+    detail = roxy.get("profile_detail")
+    return detail if isinstance(detail, dict) else {}
+
+
+def _profile_recreate_payload(account: dict) -> dict:
+    """把 /browser/detail 快照裁剪成 /browser/create 可接受的请求体。"""
+    detail = _profile_detail_from_account(account)
+    if not detail:
+        return {}
+    payload = {key: detail[key] for key in _PROFILE_CREATE_FIELDS if key in detail}
+    if detail.get("windowName"):
+        # 兼容旧版客户端使用的 name 字段，同时提交官方 windowName。
+        payload.setdefault("name", detail["windowName"])
+    proxy = detail.get("proxyInfo")
+    if isinstance(proxy, dict):
+        payload["proxyInfo"] = {key: proxy[key] for key in _PROXY_CREATE_FIELDS if key in proxy}
+    try:
+        from config import roxybrowser as roxy_cfg
+        payload["workspaceId"] = int(roxy_cfg.ROXY_WORKSPACE_ID) if str(roxy_cfg.ROXY_WORKSPACE_ID).isdigit() else roxy_cfg.ROXY_WORKSPACE_ID
+        project_id = str(getattr(roxy_cfg, "ROXY_PROJECT_ID", "") or "").strip()
+        if project_id:
+            payload["projectId"] = int(project_id) if project_id.isdigit() else project_id
+    except Exception:
+        pass
+    return payload
 
 
 def _cookie_host(cookie: dict) -> str:
@@ -305,6 +417,9 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
 
 def reopen_account_in_roxy(account: dict) -> dict:
     """创建/复用 Roxy 环境，恢复账号登录态并保持窗口打开。"""
+    email = str(account.get("email") or "").strip()
+    log_key, log_handler = _begin_reopen_log(email)
+    logger.info("[Roxy重新打开] 开始：账号=%s", email)
     state = auth_state_from_account(account)
     cookies = state.get("cookies") if isinstance(state, dict) else None
     if not isinstance(cookies, list):
@@ -326,8 +441,14 @@ def reopen_account_in_roxy(account: dict) -> dict:
                 logger.info("旧 Roxy 环境不可复用，将创建新环境 profile=%s: %s", previous_profile_id, exc)
                 opened = None
         if opened is None:
-            opened = client.open_profile()
+            recreate_payload = _profile_recreate_payload(account)
+            if recreate_payload:
+                logger.info("[Roxy重新打开] 原 Profile 不可复用，按环境快照重建：fields=%s", len(recreate_payload))
+            else:
+                logger.info("[Roxy重新打开] 没有可用环境快照，使用默认配置创建新 Profile")
+            opened = client.open_profile(create_payload=recreate_payload or None)
             created = bool(opened.created_by_run)
+        logger.info("[Roxy重新打开] Roxy 环境已打开：profile=%s created=%s", opened.profile_id, created)
         driver = _build_driver(opened)
         _center_browser_window(driver)
         driver.set_page_load_timeout(45)
@@ -355,7 +476,10 @@ def reopen_account_in_roxy(account: dict) -> dict:
                     logger.info("[Roxy重新打开] Cookie 未恢复有效 session，将重新走登录流程：%s", account.get("email"))
             except Exception as exc:
                 logger.warning("[Roxy重新打开] Cookie 恢复失败，将重新走登录流程：%s", exc)
+        else:
+            logger.info("[Roxy重新打开] 未找到 Cookie 快照，将直接走账号登录流程：%s", email)
         if not cookie_session:
+            logger.info("[Roxy重新打开] 开始账号登录流程：%s", email)
             login_result = _login_account_in_roxy(driver, account)
             auth_method = str(login_result.get("method") or "login")
             active_session = login_result.get("session") or {}
@@ -363,9 +487,16 @@ def reopen_account_in_roxy(account: dict) -> dict:
         else:
             active_session = cookie_session
         refreshed_state = capture_auth_state(driver)
+        profile_detail = {}
+        try:
+            profile_detail = client.get_profile_detail(opened.profile_id)
+            logger.info("[Roxy重新打开] 已刷新当前 Profile 环境快照：fields=%s", len(profile_detail))
+        except Exception as exc:
+            logger.warning("[Roxy重新打开] 获取当前 Profile 环境快照失败，保留旧快照：%s", exc)
         # 保留 Selenium 引用，避免请求结束后连接对象被回收；Roxy 窗口本身保持打开。
         _ACTIVE_DRIVERS[opened.profile_id] = driver
         logger.info("[Roxy重新打开] 账号=%s profile=%s cookies=%s", account.get("email"), opened.profile_id, restored)
+        logger.info("[Roxy重新打开] 完成：账号=%s auth_method=%s url=%s", email, auth_method, current_url)
         return {
             "ok": True,
             "profile_id": opened.profile_id,
@@ -375,8 +506,10 @@ def reopen_account_in_roxy(account: dict) -> dict:
             "auth_method": auth_method,
             "_access_token": active_session.get("accessToken") if isinstance(active_session, dict) else None,
             "_auth_state": refreshed_state if refreshed_state.get("cookies") else state,
+            "_profile_detail": profile_detail,
         }
-    except Exception:
+    except Exception as exc:
+        logger.exception("[Roxy重新打开] 失败：账号=%s error=%s", email, exc)
         if driver is not None:
             try:
                 driver.quit()
@@ -385,3 +518,5 @@ def reopen_account_in_roxy(account: dict) -> dict:
         if opened is not None and created:
             client.cleanup_profile(opened)
         raise
+    finally:
+        _finish_reopen_log(log_key, log_handler)

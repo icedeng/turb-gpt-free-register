@@ -198,8 +198,8 @@
       width: 100%; max-width: 100%; min-width: 0;
       max-height: 320px; overflow: auto; line-height: 1.5;
     }
-    #logPanel, #retryLogPanel, #liveLogPanel, #qrPanel { min-width: 0; max-width: 100%; overflow-x: hidden; }
-    #logPanel:not(.hidden), #retryLogPanel:not(.hidden), #liveLogPanel:not(.hidden), #qrPanel:not(.hidden) {
+    #logPanel, #retryLogPanel, #liveLogPanel, #roxyReopenLogPanel, #qrPanel { min-width: 0; max-width: 100%; overflow-x: hidden; }
+    #logPanel:not(.hidden), #retryLogPanel:not(.hidden), #liveLogPanel:not(.hidden), #roxyReopenLogPanel:not(.hidden), #qrPanel:not(.hidden) {
       position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
       z-index: 1000; display: block; width: min(1100px, calc(100vw - 48px));
       max-height: min(760px, calc(100vh - 48px)); overflow: hidden;
@@ -207,9 +207,9 @@
       background: var(--surface); box-shadow: 0 0 0 9999px rgba(15,23,42,.45), 0 24px 70px rgba(15,23,42,.34);
     }
     #qrPanel:not(.hidden) { width: min(520px, calc(100vw - 48px)); text-align: center; }
-    #logPanel h3, #retryLogPanel h3, #liveLogPanel h3, #qrPanel h3 { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-    #logPanel h3 .btn, #retryLogPanel h3 .btn, #liveLogPanel h3 .btn, #qrPanel h3 .btn { margin-left:auto; float:none !important; }
-    #logPanel .log, #retryLogPanel .log, #liveLogPanel .log { max-height: calc(min(760px, calc(100vh - 48px)) - 74px); margin-top:0; }
+    #logPanel h3, #retryLogPanel h3, #liveLogPanel h3, #roxyReopenLogPanel h3, #qrPanel h3 { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    #logPanel h3 .btn, #retryLogPanel h3 .btn, #liveLogPanel h3 .btn, #roxyReopenLogPanel h3 .btn, #qrPanel h3 .btn { margin-left:auto; float:none !important; }
+    #logPanel .log, #retryLogPanel .log, #liveLogPanel .log, #roxyReopenLogPanel .log { max-height: calc(min(760px, calc(100vh - 48px)) - 74px); margin-top:0; }
     #qrPanel img { display:block; max-width:min(360px, calc(100vw - 96px)); max-height:420px; margin:12px auto; border:1px solid var(--line); border-radius:10px; background:#fff; }
     #qrPanel .qr-link { display:block; word-break:break-all; white-space:normal; font-size:12px; color:var(--muted); margin-top:8px; }
     .hidden { display: none !important; }
@@ -2101,6 +2101,12 @@
       </h3>
       <div class="log" id="liveLogContent">加载中…</div>
     </div>
+    <div class="body hidden" id="roxyReopenLogPanel">
+      <h3>Roxy 运行日志：<span id="roxyReopenLogEmail" style="font-size:13px;font-weight:400;color:var(--muted);"></span>
+        <button class="btn" id="btnCloseRoxyReopenLog" style="float:right;min-height:28px;">关闭</button>
+      </h3>
+      <div class="log" id="roxyReopenLogContent">加载中…</div>
+    </div>
   </div>
 
   <!-- ============ Codex 授权 ============ -->
@@ -2763,6 +2769,7 @@ function updateModalScrollLock() {
   const opened = !$('#logPanel').classList.contains('hidden')
     || !$('#retryLogPanel').classList.contains('hidden')
     || !$('#liveLogPanel').classList.contains('hidden')
+    || !$('#roxyReopenLogPanel').classList.contains('hidden')
     || !$('#qrPanel').classList.contains('hidden')
     || !$('#outlookImportModal').classList.contains('hidden');
   const locked = document.body.classList.contains('modal-open');
@@ -2794,6 +2801,13 @@ function closeLiveLogModal() {
   liveLogEmail = null;
   clearInterval(liveLogTimer);
   $('#liveLogPanel').classList.add('hidden');
+  updateModalScrollLock();
+}
+function closeRoxyReopenLogModal() {
+  roxyReopenLogId = null;
+  roxyReopenLogOpenedAt = 0;
+  clearInterval(roxyReopenLogTimer);
+  $('#roxyReopenLogPanel').classList.add('hidden');
   updateModalScrollLock();
 }
 function openQrModal(url) {
@@ -3240,6 +3254,7 @@ function _accountsV2MoreMenu(r) {
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
     `<button type="button" data-account-roxy-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 RoxyBrowser</button>`,
+    `<button type="button" data-account-roxy-log="${esc(r.id)}" data-account-roxy-email="${esc(r.email || '')}" title="查看该账号最近一次 RoxyBrowser 重新打开运行日志">Roxy运行日志</button>`,
     `<button type="button" onclick="checkSelectedLive([Number('${esc(r.id)}')], this); return false;" title="重新登录该账号，成功则刷新最新 AT/accessToken">查活刷新AT</button>`,
     `<button type="button" data-account-live-log="${esc(r.email)}" title="查看该账号最近一次查活日志">查活日志</button>`,
     _planAction(r),
@@ -3403,6 +3418,36 @@ async function pollLiveLog() {
 }
 $('#btnCloseLiveLog').addEventListener('click', closeLiveLogModal);
 
+// ---------- Roxy 重新打开日志面板 ----------
+let roxyReopenLogId = null, roxyReopenLogTimer = null, roxyReopenLogOpenedAt = 0;
+
+function openRoxyReopenLog(id, email) {
+  roxyReopenLogId = Number(id);
+  roxyReopenLogOpenedAt = Date.now();
+  $('#roxyReopenLogEmail').textContent = email || '-';
+  $('#roxyReopenLogPanel').classList.remove('hidden');
+  updateModalScrollLock();
+  $('#roxyReopenLogContent').textContent = '加载中…';
+  pollRoxyReopenLog();
+  clearInterval(roxyReopenLogTimer);
+  roxyReopenLogTimer = setInterval(pollRoxyReopenLog, 2000);
+}
+async function pollRoxyReopenLog() {
+  if (roxyReopenLogId == null) return;
+  try {
+    const r = await api(`/api/accounts/${encodeURIComponent(roxyReopenLogId)}/roxy-reopen-log`);
+    const c = $('#roxyReopenLogContent');
+    const atBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 30;
+    c.textContent = r.log || '(暂无日志，等待任务写入…)';
+    if (atBottom) c.scrollTop = c.scrollHeight;
+    // 点击“重新打开”时日志文件可能尚未来得及创建，保留短暂轮询窗口避免错过启动日志。
+    if (!r.running && (r.log || Date.now() - roxyReopenLogOpenedAt > 10000)) {
+      clearInterval(roxyReopenLogTimer);
+    }
+  } catch(e) {}
+}
+$('#btnCloseRoxyReopenLog').addEventListener('click', closeRoxyReopenLogModal);
+
 // 账号操作按钮（事件委托）
 async function onAccountsBodyClick(e) {
   const moreToggle = e.target.closest('[data-acc-more-toggle]');
@@ -3464,6 +3509,8 @@ async function onAccountsBodyClick(e) {
   const roxyReopenBtn = e.target.closest('[data-account-roxy-reopen]');
   if (roxyReopenBtn) {
     const id = Number(roxyReopenBtn.dataset.accountRoxyReopen);
+    const row = ACCOUNTS.find(item => Number(item.id) === id);
+    openRoxyReopenLog(id, row?.email || '');
     roxyReopenBtn.disabled = true;
     const oldText = roxyReopenBtn.textContent;
     roxyReopenBtn.textContent = '正在打开…';
@@ -3479,6 +3526,15 @@ async function onAccountsBodyClick(e) {
       roxyReopenBtn.disabled = false;
       roxyReopenBtn.textContent = oldText;
     }
+    return;
+  }
+
+  const roxyLogBtn = e.target.closest('[data-account-roxy-log]');
+  if (roxyLogBtn) {
+    openRoxyReopenLog(
+      Number(roxyLogBtn.dataset.accountRoxyLog),
+      roxyLogBtn.dataset.accountRoxyEmail || '',
+    );
     return;
   }
 

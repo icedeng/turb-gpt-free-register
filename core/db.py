@@ -1221,6 +1221,7 @@ def update_account_roxy_reopen(
     error: str | None = None,
     auth_state: dict | None = None,
     access_token: str | None = None,
+    profile_detail: dict | None = None,
 ) -> bool:
     """保存账号最近一次 RoxyBrowser 重新打开的环境及错误摘要。"""
     with _LOCK:
@@ -1250,6 +1251,14 @@ def update_account_roxy_reopen(
             reopen["error_at"] = _now()
         state["reopen"] = reopen
         extra["roxy_auth_state"] = state
+        if isinstance(profile_detail, dict) and profile_detail:
+            roxy = extra.get("roxybrowser")
+            if not isinstance(roxy, dict):
+                roxy = {}
+            roxy["profile_detail"] = profile_detail
+            if profile_id:
+                roxy["profile_id"] = str(profile_id)
+            extra["roxybrowser"] = roxy
         row["extra_json"] = json.dumps(extra, ensure_ascii=False)
         if access_token:
             row["access_token"] = str(access_token)

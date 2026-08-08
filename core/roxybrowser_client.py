@@ -374,6 +374,47 @@ class RoxyBrowserClient:
 
         return {"ok": False, "items": [], "errors": errors}
 
+    @staticmethod
+    def _extract_profile_detail(payload: dict) -> dict:
+        """解析 /browser/detail 返回的 data.rows[0]；兼容部分版本直接返回 data 对象。"""
+        if not isinstance(payload, dict):
+            return {}
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("rows", "list", "records", "items"):
+                rows = data.get(key)
+                if isinstance(rows, list):
+                    first = next((x for x in rows if isinstance(x, dict)), None)
+                    if first:
+                        return dict(first)
+            if data.get("dirId") or data.get("windowName") or data.get("os"):
+                return dict(data)
+        if payload.get("dirId") or payload.get("windowName") or payload.get("os"):
+            return dict(payload)
+        return {}
+
+    def get_profile_detail(self, profile_id: str) -> dict:
+        """获取 Roxy 窗口完整配置，供 Profile 删除后的环境重建使用。"""
+        pid = self._normalize_profile_id(profile_id)
+        if not pid:
+            return {}
+        path = str(getattr(_cfg, "ROXY_DETAIL_PATH", "/browser/detail") or "/browser/detail").format(profile_id=pid)
+        method = str(getattr(_cfg, "ROXY_DETAIL_METHOD", "GET") or "GET").upper()
+        body = {
+            "workspaceId": _workspace_id_value(),
+            "dirId": int(pid) if str(pid).isdigit() else pid,
+        }
+        result = self.request(
+            method,
+            path,
+            params=body if method == "GET" else None,
+            json_body=body if method != "GET" else None,
+        )
+        detail = self._extract_profile_detail(result)
+        if not detail:
+            raise RuntimeError(f"Roxy 窗口明细接口未返回 Profile 配置: {result}")
+        return detail
+
     def create_profile(self, payload: dict | None = None) -> str:
         body = dict(getattr(_cfg, "ROXY_PROFILE_CREATE_PAYLOAD", {}) or {})
         random_name_enabled = bool(getattr(_cfg, "ROXY_RANDOM_PROFILE_NAME_ON_CREATE", True))
@@ -452,7 +493,13 @@ class RoxyBrowserClient:
             return ""
         return text
 
-    def open_profile(self, profile_id: str | None = None, *, reuse_existing: bool = False) -> RoxyOpenResult:
+    def open_profile(
+        self,
+        profile_id: str | None = None,
+        *,
+        reuse_existing: bool = False,
+        create_payload: dict | None = None,
+    ) -> RoxyOpenResult:
         one_profile = bool(getattr(_cfg, "ROXY_ONE_PROFILE_PER_ACCOUNT", True))
         configured_pid = self._normalize_profile_id(profile_id if profile_id is not None else getattr(_cfg, "ROXY_PROFILE_ID", ""))
         if one_profile and configured_pid and not reuse_existing:
@@ -464,7 +511,7 @@ class RoxyBrowserClient:
         pid = configured_pid
         created_by_run = False
         if not pid:
-            pid = self.create_profile()
+            pid = self.create_profile(payload=create_payload)
             created_by_run = True
             logger.info("[Roxy] 已创建临时环境：%s", pid)
 

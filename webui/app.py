@@ -466,11 +466,13 @@ def create_app(auth_code: str | None = None) -> Flask:
             result = reopen_account_in_roxy(acc)
             auth_state = result.pop("_auth_state", None)
             access_token = result.pop("_access_token", None)
+            profile_detail = result.pop("_profile_detail", None)
             db.update_account_roxy_reopen(
                 acc_id,
                 profile_id=result.get("profile_id"),
                 auth_state=auth_state,
                 access_token=access_token,
+                profile_detail=profile_detail,
             )
             return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
         except Exception as exc:
@@ -481,6 +483,31 @@ def create_app(auth_code: str | None = None) -> Flask:
                 pass
             status = 400 if any(x in str(exc) for x in ("账号缺少邮箱", "没有保存密码")) else 500
             return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), status
+
+    @app.get("/api/accounts/<int:acc_id>/roxy-reopen-log")
+    def api_account_roxy_reopen_log(acc_id: int):
+        """读取该账号最近一次 RoxyBrowser 重新打开日志。"""
+        acc = db.get_account(acc_id)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        email = str(acc.get("email") or "").strip()
+        if not email:
+            return jsonify({"ok": False, "error": "账号邮箱为空"}), 400
+        from core import roxy_reopen
+        path = roxy_reopen.log_path(email)
+        if not path.exists():
+            return jsonify({"ok": True, "log": "", "running": roxy_reopen.is_reopening(email)})
+        max_bytes = 80_000
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            content = f.read().decode("utf-8", errors="replace")
+        return jsonify({
+            "ok": True,
+            "log": content,
+            "running": roxy_reopen.is_reopening(email),
+        })
 
     @app.post("/api/accounts/note-bulk")
     def api_accounts_note_bulk():
