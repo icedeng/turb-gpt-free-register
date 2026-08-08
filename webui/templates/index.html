@@ -3239,6 +3239,7 @@ function _accountsV2MoreMenu(r) {
   const parts = [
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
+    `<button type="button" data-account-roxy-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 RoxyBrowser</button>`,
     `<button type="button" onclick="checkSelectedLive([Number('${esc(r.id)}')], this); return false;" title="重新登录该账号，成功则刷新最新 AT/accessToken">查活刷新AT</button>`,
     `<button type="button" data-account-live-log="${esc(r.email)}" title="查看该账号最近一次查活日志">查活日志</button>`,
     _planAction(r),
@@ -3457,6 +3458,27 @@ async function onAccountsBodyClick(e) {
   const liveLogBtn = e.target.closest('[data-account-live-log]');
   if (liveLogBtn) {
     openLiveLog(liveLogBtn.dataset.accountLiveLog);
+    return;
+  }
+
+  const roxyReopenBtn = e.target.closest('[data-account-roxy-reopen]');
+  if (roxyReopenBtn) {
+    const id = Number(roxyReopenBtn.dataset.accountRoxyReopen);
+    roxyReopenBtn.disabled = true;
+    const oldText = roxyReopenBtn.textContent;
+    roxyReopenBtn.textContent = '正在打开…';
+    try {
+      const r = await api(`/api/accounts/${encodeURIComponent(id)}/roxy-reopen`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      const method = r.auth_method === 'cookie' ? 'Cookie' : '重新登录';
+      showToast(`RoxyBrowser 已打开（${method}，Cookie ${r.restored_cookies || 0} 个）`);
+    } catch (err) {
+      showToast('重新打开失败: ' + err.message);
+    } finally {
+      roxyReopenBtn.disabled = false;
+      roxyReopenBtn.textContent = oldText;
+    }
     return;
   }
 

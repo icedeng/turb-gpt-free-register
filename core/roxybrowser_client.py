@@ -452,10 +452,10 @@ class RoxyBrowserClient:
             return ""
         return text
 
-    def open_profile(self, profile_id: str | None = None) -> RoxyOpenResult:
+    def open_profile(self, profile_id: str | None = None, *, reuse_existing: bool = False) -> RoxyOpenResult:
         one_profile = bool(getattr(_cfg, "ROXY_ONE_PROFILE_PER_ACCOUNT", True))
         configured_pid = self._normalize_profile_id(profile_id if profile_id is not None else getattr(_cfg, "ROXY_PROFILE_ID", ""))
-        if one_profile and configured_pid:
+        if one_profile and configured_pid and not reuse_existing:
             raise RuntimeError(
                 "已启用 ROXY_ONE_PROFILE_PER_ACCOUNT=True（一号一环境），"
                 "不能配置/传入固定 ROXY_PROFILE_ID；请留空以便每个账号创建新环境。"

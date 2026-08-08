@@ -2065,6 +2065,13 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
         logger.info("[Roxy注册] 已拿到 accessToken：%s", email)
         _check_manual_stop()
 
+        # 注册环境会在流程结束时关闭并删除；保存 Cookie/Web Storage，后续账号页才能
+        # 创建新的 Roxy 环境并恢复登录态。必须在 Codex 流程清理浏览器状态前抓取。
+        from core.roxy_reopen import capture_auth_state
+        roxy_auth_state = capture_auth_state(driver)
+        if not roxy_auth_state.get("cookies"):
+            logger.warning("[Roxy注册] 未抓取到可恢复的 Cookie，账号仍会保存但无法保证重新打开自动登录")
+
         if _twofa_cfg.ENABLE_2FA:
             logger.warning("[Roxy注册] 当前 Roxy 自动化路径暂不执行 2FA 设置，已跳过")
         totp_secret = None
@@ -2107,6 +2114,7 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
                 "account": session_info.get("account"),
                 "expires": session_info.get("expires"),
                 "roxybrowser": {"profile_id": opened.profile_id, "open_result": opened.raw},
+                "roxy_auth_state": roxy_auth_state,
                 "registration_password": openai_password,
                 "codex": codex_result,
             },

@@ -1214,6 +1214,50 @@ def update_account_note(acc_id: int, note: str) -> bool:
         return True
 
 
+def update_account_roxy_reopen(
+    acc_id: int,
+    *,
+    profile_id: str | None = None,
+    error: str | None = None,
+    auth_state: dict | None = None,
+    access_token: str | None = None,
+) -> bool:
+    """保存账号最近一次 RoxyBrowser 重新打开的环境及错误摘要。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        raw = row.get("extra_json")
+        try:
+            extra = json.loads(raw) if isinstance(raw, str) and raw else (raw if isinstance(raw, dict) else {})
+        except Exception:
+            extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+        state = auth_state if isinstance(auth_state, dict) else extra.get("roxy_auth_state")
+        if not isinstance(state, dict):
+            state = {}
+        reopen = state.get("reopen")
+        if not isinstance(reopen, dict):
+            reopen = {}
+        if profile_id:
+            reopen["profile_id"] = str(profile_id)
+            reopen["opened_at"] = _now()
+            reopen.pop("error", None)
+        if error:
+            reopen["error"] = str(error)[:500]
+            reopen["error_at"] = _now()
+        state["reopen"] = reopen
+        extra["roxy_auth_state"] = state
+        row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+        if access_token:
+            row["access_token"] = str(access_token)
+        row["updated_at"] = _now()
+        _save_accounts(rows)
+        return True
+
+
 def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
     """写回账号查活结果；成功时同步刷新最新 access_token 和账号基础信息。"""
     result = result or {}

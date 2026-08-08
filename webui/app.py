@@ -87,7 +87,6 @@ def _compact_account_for_list(row: dict) -> dict:
         "totp_enabled": bool(row.get("totp_secret")),
         "codex_agent_has_token": bool(str(row.get("codex_agent_token") or "").strip()),
     }
-
     # 这些是列表固定列直接展示字段。
     for key in (
         "user_name", "email_source", "note", "archived", "created_at",
@@ -455,6 +454,33 @@ def create_app(auth_code: str | None = None) -> Flask:
         if not updated:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         return jsonify({"ok": True, "updated": True, "id": acc_id, "note": note})
+
+    @app.post("/api/accounts/<int:acc_id>/roxy-reopen")
+    def api_account_roxy_reopen(acc_id: int):
+        """创建/复用 RoxyBrowser 环境，恢复该账号保存的 ChatGPT 登录态。"""
+        acc = db.get_account(acc_id)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        try:
+            from core.roxy_reopen import reopen_account_in_roxy
+            result = reopen_account_in_roxy(acc)
+            auth_state = result.pop("_auth_state", None)
+            access_token = result.pop("_access_token", None)
+            db.update_account_roxy_reopen(
+                acc_id,
+                profile_id=result.get("profile_id"),
+                auth_state=auth_state,
+                access_token=access_token,
+            )
+            return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
+        except Exception as exc:
+            logger.exception("重新打开 RoxyBrowser 失败: account_id=%s", acc_id)
+            try:
+                db.update_account_roxy_reopen(acc_id, error=f"{type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            status = 400 if any(x in str(exc) for x in ("账号缺少邮箱", "没有保存密码")) else 500
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), status
 
     @app.post("/api/accounts/note-bulk")
     def api_accounts_note_bulk():
