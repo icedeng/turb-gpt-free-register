@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 _CHATGPT_URL = "https://chatgpt.com/"
 _LOG_DIR = Path(__file__).resolve().parent.parent / "注册日志"
-_ACTIVE_DRIVERS: dict[str, object] = {}
 _RUNNING: set[str] = set()
 _RUNNING_LOCK = threading.Lock()
 
@@ -55,6 +54,21 @@ def log_path(email: str) -> Path:
 def is_reopening(email: str) -> bool:
     with _RUNNING_LOCK:
         return _email_key(email) in _RUNNING
+
+
+def _cleanup_reopen_resources(client: RoxyBrowserClient, opened: RoxyOpenResult | None, driver) -> None:
+    """重新打开流程结束后关闭浏览器并删除 Profile，不保留 Roxy 窗口。"""
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception as exc:
+            logger.warning("[Roxy重新打开] 退出 Selenium 失败：%s", exc)
+    if opened is None or not opened.profile_id:
+        return
+    # 重新打开使用的是一次性环境：即使复用了旧 Profile，也必须删除，避免窗口额度持续增长。
+    client.close_profile(opened.profile_id)
+    client.delete_profile(opened.profile_id)
+    logger.info("[Roxy重新打开] 已清理环境：profile=%s", opened.profile_id)
 
 
 def _begin_reopen_log(email: str) -> tuple[str, logging.FileHandler | None]:
@@ -416,7 +430,7 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
 
 
 def reopen_account_in_roxy(account: dict) -> dict:
-    """创建/复用 Roxy 环境，恢复账号登录态并保持窗口打开。"""
+    """创建/复用一次性 Roxy 环境，恢复登录态后关闭并删除环境。"""
     email = str(account.get("email") or "").strip()
     log_key, log_handler = _begin_reopen_log(email)
     logger.info("[Roxy重新打开] 开始：账号=%s", email)
@@ -493,8 +507,6 @@ def reopen_account_in_roxy(account: dict) -> dict:
             logger.info("[Roxy重新打开] 已刷新当前 Profile 环境快照：fields=%s", len(profile_detail))
         except Exception as exc:
             logger.warning("[Roxy重新打开] 获取当前 Profile 环境快照失败，保留旧快照：%s", exc)
-        # 保留 Selenium 引用，避免请求结束后连接对象被回收；Roxy 窗口本身保持打开。
-        _ACTIVE_DRIVERS[opened.profile_id] = driver
         logger.info("[Roxy重新打开] 账号=%s profile=%s cookies=%s", account.get("email"), opened.profile_id, restored)
         logger.info("[Roxy重新打开] 完成：账号=%s auth_method=%s url=%s", email, auth_method, current_url)
         return {
@@ -510,13 +522,7 @@ def reopen_account_in_roxy(account: dict) -> dict:
         }
     except Exception as exc:
         logger.exception("[Roxy重新打开] 失败：账号=%s error=%s", email, exc)
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
-        if opened is not None and created:
-            client.cleanup_profile(opened)
         raise
     finally:
+        _cleanup_reopen_resources(client, opened, driver)
         _finish_reopen_log(log_key, log_handler)

@@ -1,8 +1,10 @@
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from core.proxy_utils import normalize_proxy_url
 from core import roxybrowser_client
+from core import roxy_reopen
 from core.roxybrowser_client import RoxyBrowserClient, _proxy_url_to_roxy_info
 
 
@@ -89,6 +91,17 @@ class ProxyUtilsTests(unittest.TestCase):
              patch.object(roxybrowser_client._cfg, "ROXY_PROXY_POOL", []):
             with self.assertRaisesRegex(RuntimeError, "ROXY_PROXY_POOL 为空"):
                 client.create_profile()
+
+    def test_reopen_cleanup_quits_closes_and_deletes_profile(self):
+        client = MagicMock()
+        driver = MagicMock()
+        opened = SimpleNamespace(profile_id="temporary-profile")
+
+        roxy_reopen._cleanup_reopen_resources(client, opened, driver)
+
+        driver.quit.assert_called_once_with()
+        client.close_profile.assert_called_once_with("temporary-profile")
+        client.delete_profile.assert_called_once_with("temporary-profile")
 
 
 if __name__ == "__main__":
