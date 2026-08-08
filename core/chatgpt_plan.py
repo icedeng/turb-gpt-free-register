@@ -13,6 +13,7 @@ from typing import Any, Optional
 from urllib.parse import quote, urlparse
 
 from core.session import BrowserSession
+from core.proxy_utils import normalize_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,11 @@ def normalize_token(token: str) -> str:
 
 def _mask_proxy(proxy: str) -> str:
     """返回可用于日志/API 结果的代理摘要，不泄露用户名和密码。"""
-    value = str(proxy or "").strip()
+    value = normalize_proxy_url(proxy)
     if not value:
         return ""
     try:
-        parsed = urlparse(value if "://" in value else f"//{value}")
+        parsed = urlparse(value)
         host = parsed.hostname or ""
         port = f":{parsed.port}" if parsed.port else ""
         scheme = f"{parsed.scheme}://" if parsed.scheme else ""
@@ -50,11 +51,11 @@ def _mask_proxy(proxy: str) -> str:
 
 def _local_proxy_status(proxy: str) -> tuple[bool, bool, str | None]:
     """检查回环代理端口；非本地代理不做预探测，避免额外网络请求。"""
-    value = str(proxy or "").strip()
+    value = normalize_proxy_url(proxy)
     if not value:
         return False, False, None
     try:
-        parsed = urlparse(value if "://" in value else f"//{value}")
+        parsed = urlparse(value)
         host = parsed.hostname or ""
         is_loopback = host.lower() == "localhost"
         if not is_loopback:
@@ -81,7 +82,7 @@ def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
     explicit_proxy 不是 None 时表示 API 调用方明确覆盖配置；空字符串代表直连。
     """
     if explicit_proxy is not None:
-        selected = str(explicit_proxy or "").strip()
+        selected = normalize_proxy_url(explicit_proxy)
         return {
             "proxy": selected,
             "proxy_mode": "request",
@@ -104,7 +105,7 @@ def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
             "proxy_fallback_reason": None,
         }
 
-    selected = str(getattr(proxy_cfg, "PLAN_CHECK_PROXY", "") or "").strip()
+    selected = normalize_proxy_url(getattr(proxy_cfg, "PLAN_CHECK_PROXY", ""))
     if not selected:
         selected = str(proxy_cfg.pick_proxy() or "").strip()
     if not selected:

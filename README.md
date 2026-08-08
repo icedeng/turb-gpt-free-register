@@ -372,6 +372,14 @@ PROXY_POOL = [
 ]
 ```
 
+代理池也支持不带协议的简写，每行一个代理；无协议时会自动按 SOCKS5 处理：
+
+```text
+user:pass@hostname:port
+hostname:port:username:password
+hostname:port@username:password
+```
+
 Roxy 一号一环境开启 `ROXY_CREATE_USE_PROXY_POOL=True` 时，会从这里随机取代理写入 Roxy Profile。
 
 ---
