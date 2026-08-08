@@ -383,7 +383,8 @@ hostname:port@username:password
 
 无协议格式默认按 SOCKS5 处理；`http://`、`socks5://`、`socks5h://` 可加在任意一种格式前面，用于明确代理协议。
 
-Roxy 一号一环境开启 `ROXY_CREATE_USE_PROXY_POOL=True` 时，会从这里随机取代理写入 Roxy Profile。
+Roxy 一号一环境使用独立的 `ROXY_PROXY_POOL`。在 WebUI「配置 → RoxyBrowser」填写专用代理池并开启
+`ROXY_CREATE_USE_PROXY_POOL=True` 后，每次新建 Roxy Profile 都会从专用池随机取代理；不会读取本节的通用 `PROXY_POOL`。
 
 ---
 

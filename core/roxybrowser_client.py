@@ -447,24 +447,24 @@ class RoxyBrowserClient:
         project_id = _project_id_value()
         if project_id:
             body.setdefault("projectId", project_id)
-        if bool(getattr(_cfg, "ROXY_CREATE_USE_PROXY_POOL", False)) and not body.get("proxyInfo"):
-            from config import proxy as _proxy_cfg
-
-            proxy_url = _proxy_cfg.pick_proxy()
-            if proxy_url:
-                proxy_info = _proxy_url_to_roxy_info(proxy_url)
-                body["proxyInfo"] = proxy_info
-                logger.info(
-                    "[Roxy] 创建环境启用代理池：proxy=%s type=%s host=%s port=%s",
-                    _mask_proxy(proxy_url),
-                    proxy_info.get("protocol") or proxy_info.get("proxyCategory"),
-                    proxy_info.get("host"),
-                    proxy_info.get("port"),
-                )
-            else:
-                logger.warning("[Roxy] 已启用 ROXY_CREATE_USE_PROXY_POOL，但 PROXY_POOL 为空，本次创建环境不设置代理")
         if payload:
             body.update(payload)
+        if bool(getattr(_cfg, "ROXY_CREATE_USE_PROXY_POOL", False)):
+            proxy_pool = list(getattr(_cfg, "ROXY_PROXY_POOL", []) or [])
+            if not proxy_pool:
+                raise RuntimeError("已启用 ROXY_CREATE_USE_PROXY_POOL，但 RoxyBrowser 专用代理池 ROXY_PROXY_POOL 为空")
+            proxy_url = random.choice(proxy_pool)
+            proxy_info = _proxy_url_to_roxy_info(proxy_url)
+            # 专用代理池优先于环境快照，确保每次创建新窗口都会重新随机代理。
+            body["proxyInfo"] = proxy_info
+            logger.info(
+                "[Roxy] 创建环境启用Roxy专用代理池：proxy=%s type=%s host=%s port=%s pool_size=%s",
+                _mask_proxy(proxy_url),
+                proxy_info.get("protocol") or proxy_info.get("proxyCategory"),
+                proxy_info.get("host"),
+                proxy_info.get("port"),
+                len(proxy_pool),
+            )
         if not body.get("workspaceId"):
             raise RuntimeError(
                 "Roxy 创建环境需要 workspaceId。请在 config/roxybrowser.py 或 WebUI 的 RoxyBrowser 配置中填写 ROXY_WORKSPACE_ID，"
