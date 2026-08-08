@@ -140,6 +140,42 @@ class ProxyUtilsTests(unittest.TestCase):
         self.assertTrue(result["already_released"])
         self.assertTrue(result["deleted"])
 
+    def test_roxy_restored_session_rejects_visible_expired_dialog(self):
+        driver = MagicMock()
+        driver.execute_script.return_value = {
+            "url": "https://chatgpt.com/",
+            "text": "Your session has expired\nPlease log in again to continue using the app.",
+        }
+        session = {"accessToken": "opaque-token", "user": {"email": "user@example.com"}}
+
+        usable, reason = roxy_reopen._chatgpt_session_is_usable(driver, session, "user@example.com")
+
+        self.assertFalse(usable)
+        self.assertIn("session_has_expired", reason)
+        driver.execute_async_script.assert_not_called()
+
+    def test_roxy_restored_session_rejects_backend_401(self):
+        driver = MagicMock()
+        driver.execute_script.return_value = {"url": "https://chatgpt.com/", "text": "New chat"}
+        driver.execute_async_script.return_value = {"status": 401}
+        session = {"accessToken": "opaque-token", "user": {"email": "user@example.com"}}
+
+        usable, reason = roxy_reopen._chatgpt_session_is_usable(driver, session, "user@example.com")
+
+        self.assertFalse(usable)
+        self.assertEqual(reason, "access_token_http_401")
+
+    def test_roxy_restored_session_accepts_matching_live_session(self):
+        driver = MagicMock()
+        driver.execute_script.return_value = {"url": "https://chatgpt.com/", "text": "New chat"}
+        driver.execute_async_script.return_value = {"status": 200}
+        session = {"accessToken": "opaque-token", "user": {"email": "user@example.com"}}
+
+        usable, reason = roxy_reopen._chatgpt_session_is_usable(driver, session, "user@example.com")
+
+        self.assertTrue(usable)
+        self.assertEqual(reason, "session_ok:http_200")
+
     def test_account_trial_filter_distinguishes_eligible_ineligible_and_unknown(self):
         self.assertTrue(db._account_matches_trial_filter({"plus_trial_eligible": True}, "eligible"))
         self.assertFalse(db._account_matches_trial_filter({"plus_trial_eligible": False}, "eligible"))

@@ -2,6 +2,7 @@
 """使用已保存的 ChatGPT 浏览器状态重新打开 RoxyBrowser。"""
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import threading
@@ -334,6 +335,108 @@ def _restore_cookies(driver, cookies: list[dict]) -> int:
     return restored
 
 
+def _clear_stale_chatgpt_auth_state(driver) -> None:
+    """清理已判定失效的 ChatGPT 会话，避免旧 token 让登录状态检测误判。"""
+    try:
+        driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+    except Exception:
+        try:
+            driver.delete_all_cookies()
+        except Exception:
+            pass
+    try:
+        driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
+    except Exception:
+        pass
+
+
+def _jwt_is_expired(token: str, leeway_seconds: int = 30) -> bool | None:
+    """只解析 JWT exp 做本地过期判断；非 JWT 返回 None 交给远端/页面判断。"""
+    parts = str(token or "").split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        data = json.loads(payload.decode("utf-8"))
+        exp = float(data.get("exp"))
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError, UnicodeDecodeError, base64.binascii.Error):
+        return None
+    return time.time() >= exp - max(0, int(leeway_seconds))
+
+
+def _page_reports_expired_session(driver) -> tuple[bool, str]:
+    """检查页面可见文本，识别 ChatGPT 已弹出的会话过期提示。"""
+    try:
+        snapshot = driver.execute_script(
+            """
+            const body = document.body ? (document.body.innerText || '') : '';
+            const dialogs = [...document.querySelectorAll('[role=dialog], [aria-modal=true]')]
+              .filter(el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length))
+              .map(el => el.innerText || '').join('\\n');
+            return {url: location.href, text: (dialogs || body).slice(0, 4000)};
+            """
+        ) or {}
+        text = str(snapshot.get("text") or "")
+        lower = text.lower()
+        markers = (
+            "your session has expired",
+            "session has expired",
+            "please log in again",
+            "会话已过期",
+            "登录已过期",
+            "请重新登录",
+        )
+        for marker in markers:
+            if marker in lower:
+                return True, marker
+        return False, ""
+    except Exception as exc:
+        logger.debug("[Roxy重新打开] 检查页面会话过期提示失败：%s", exc)
+        return False, ""
+
+
+def _probe_chatgpt_access_token(driver, token: str) -> int | None:
+    """在同一 Roxy 环境内探测 accessToken；401 表示 token 已失效。"""
+    try:
+        result = driver.execute_async_script(
+            """
+            const token = arguments[0];
+            const done = arguments[arguments.length - 1];
+            fetch('/backend-api/accounts/check/v4-2023-04-27?timezone_offset_min=0', {
+              credentials: 'include',
+              headers: {authorization: `Bearer ${token}`},
+            }).then(r => done({status: r.status})).catch(() => done({status: 0}));
+            """,
+            str(token),
+        ) or {}
+        status = int(result.get("status") or 0)
+        return status or None
+    except Exception:
+        return None
+
+
+def _chatgpt_session_is_usable(driver, session: dict, expected_email: str) -> tuple[bool, str]:
+    """综合页面、JWT、账号邮箱和同环境 API 判断恢复的登录态是否真的可用。"""
+    token = str(session.get("accessToken") or "").strip() if isinstance(session, dict) else ""
+    if not token:
+        return False, "session_missing_access_token"
+    expired = _jwt_is_expired(token)
+    if expired is True:
+        return False, "access_token_expired"
+    user = session.get("user") if isinstance(session, dict) else None
+    session_email = str((user or {}).get("email") or "").strip().lower() if isinstance(user, dict) else ""
+    wanted_email = str(expected_email or "").strip().lower()
+    if session_email and wanted_email and session_email != wanted_email:
+        return False, f"session_email_mismatch:{session_email}"
+    expired_page, marker = _page_reports_expired_session(driver)
+    if expired_page:
+        return False, f"page_{marker.replace(' ', '_')}"
+    status = _probe_chatgpt_access_token(driver, token)
+    if status == 401:
+        return False, "access_token_http_401"
+    return True, f"session_ok{':http_' + str(status) if status else ''}"
+
+
 def _fill_login_password(driver, password: str) -> None:
     """填写 auth.openai.com 登录密码页，不依赖按钮文字。"""
     from core.roxy_registration import _human_click, _human_type_text, _password_page_state
@@ -405,6 +508,7 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
     password = str(extra.get("registration_password") or "").strip()
     login_method = "email_otp"
     otp_after_ts = time.time()
+    _clear_stale_chatgpt_auth_state(driver)
     _safe_get(
         driver,
         "https://chatgpt.com/auth/login",
@@ -418,6 +522,9 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
     state = _wait_email_submit_next_state(driver, email, timeout=30)
     if state == "logged_in":
         session = _fetch_chatgpt_session(driver, timeout=30, auto_jump_wait=5)
+        usable, reason = _chatgpt_session_is_usable(driver, session, email)
+        if not usable:
+            raise RuntimeError(f"重新登录后 ChatGPT 会话仍不可用: {reason}")
         return {"session": session, "method": "email_cookie_or_existing"}
 
     # 优先使用注册时保存的密码；没有密码或密码页没有可用密码时再尝试一次性验证码。
@@ -465,6 +572,9 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
         # 密码提交后可能没有及时被状态轮询捕获，交给 session 检查做最后确认。
         logger.info("Roxy 登录状态未明确收敛，继续读取 ChatGPT session：state=%s", state)
     session = _fetch_chatgpt_session(driver, timeout=60, auto_jump_wait=8)
+    usable, reason = _chatgpt_session_is_usable(driver, session, email)
+    if not usable:
+        raise RuntimeError(f"重新登录后 ChatGPT 会话仍不可用: {reason}")
     return {"session": session, "method": login_method}
 
 
@@ -525,6 +635,15 @@ def reopen_account_in_roxy(account: dict) -> dict:
                 if "/auth/login" not in str(current_url).lower() and "/log-in" not in str(current_url).lower():
                     from core.roxy_registration import _read_chatgpt_session_once
                     cookie_session = _read_chatgpt_session_once(driver)
+                    if cookie_session:
+                        usable, reason = _chatgpt_session_is_usable(driver, cookie_session, email)
+                        if not usable:
+                            logger.info(
+                                "[Roxy重新打开] Cookie session 已失效，清理旧认证态并重新登录：reason=%s",
+                                reason,
+                            )
+                            _clear_stale_chatgpt_auth_state(driver)
+                            cookie_session = None
                 if not cookie_session:
                     logger.info("[Roxy重新打开] Cookie 未恢复有效 session，将重新走登录流程：%s", account.get("email"))
             except Exception as exc:
