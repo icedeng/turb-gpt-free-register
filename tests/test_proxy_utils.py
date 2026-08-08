@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from core.proxy_utils import normalize_proxy_url
 from core import roxybrowser_client
 from core import roxy_reopen
+from core import db
 from core.roxybrowser_client import RoxyBrowserClient, _proxy_url_to_roxy_info
 
 
@@ -102,6 +103,49 @@ class ProxyUtilsTests(unittest.TestCase):
         driver.quit.assert_not_called()
         client.close_profile.assert_not_called()
         client.delete_profile.assert_not_called()
+
+    def test_close_and_release_account_roxy_closes_and_deletes_recorded_profile(self):
+        account = {
+            "email": "user@example.com",
+            "extra_json": '{"roxy_auth_state":{"reopen":{"profile_id":"temporary-profile"}}}',
+        }
+        client = MagicMock()
+        client.close_profile.return_value = True
+        client.delete_profile.return_value = True
+
+        with patch.object(roxy_reopen, "RoxyBrowserClient", return_value=client):
+            result = roxy_reopen.close_and_release_account_roxy(account)
+
+        client.close_profile.assert_called_once_with("temporary-profile")
+        client.delete_profile.assert_called_once_with("temporary-profile", strict=True)
+        self.assertTrue(result["deleted"])
+
+    def test_close_and_release_account_roxy_is_idempotent_without_profile(self):
+        result = roxy_reopen.close_and_release_account_roxy({"email": "user@example.com"})
+
+        self.assertTrue(result["already_released"])
+
+    def test_close_and_release_account_roxy_clears_stale_missing_profile(self):
+        account = {
+            "email": "user@example.com",
+            "extra_json": '{"roxy_auth_state":{"reopen":{"profile_id":"stale-profile"}}}',
+        }
+        client = MagicMock()
+        client.close_profile.return_value = False
+        client.delete_profile.side_effect = RuntimeError("Roxy API 返回失败: 环境不存在")
+
+        with patch.object(roxy_reopen, "RoxyBrowserClient", return_value=client):
+            result = roxy_reopen.close_and_release_account_roxy(account)
+
+        self.assertTrue(result["already_released"])
+        self.assertTrue(result["deleted"])
+
+    def test_account_trial_filter_distinguishes_eligible_ineligible_and_unknown(self):
+        self.assertTrue(db._account_matches_trial_filter({"plus_trial_eligible": True}, "eligible"))
+        self.assertFalse(db._account_matches_trial_filter({"plus_trial_eligible": False}, "eligible"))
+        self.assertTrue(db._account_matches_trial_filter({"plus_trial_eligible": False}, "ineligible"))
+        self.assertTrue(db._account_matches_trial_filter({}, "unknown"))
+        self.assertFalse(db._account_matches_trial_filter({"plus_trial_eligible": "yes"}, "unknown"))
 
 
 if __name__ == "__main__":

@@ -183,6 +183,49 @@ def auth_state_from_account(account: dict) -> dict:
     return state if isinstance(state, dict) else {}
 
 
+def reopen_record_from_account(account: dict) -> dict:
+    """读取最近一次账号页 Roxy 重新打开记录。"""
+    state = auth_state_from_account(account)
+    reopen = state.get("reopen")
+    return dict(reopen) if isinstance(reopen, dict) else {}
+
+
+def close_and_release_account_roxy(account: dict) -> dict:
+    """关闭账号页打开的 Roxy 窗口并删除 Profile，释放窗口额度。"""
+    email = str(account.get("email") or "").strip()
+    reopen = reopen_record_from_account(account)
+    profile_id = str(reopen.get("profile_id") or "").strip()
+    if not profile_id:
+        return {"ok": True, "profile_id": "", "already_released": True, "closed": False, "deleted": False}
+
+    client = RoxyBrowserClient()
+    closed = client.close_profile(profile_id)
+    already_released = False
+    try:
+        deleted = client.delete_profile(profile_id, strict=True)
+    except Exception as exc:
+        message = str(exc).lower()
+        missing_markers = ("不存在", "未找到", "not found", "does not exist", "already deleted", "已删除")
+        if not any(marker in message for marker in missing_markers):
+            raise RuntimeError(f"Roxy Profile 删除失败，未能释放窗口额度: {profile_id}: {exc}") from exc
+        deleted = True
+        already_released = True
+        logger.info("[Roxy重新打开] Profile 已不存在，按已释放处理：profile=%s", profile_id)
+    logger.info(
+        "[Roxy重新打开] 已关闭并释放环境：账号=%s profile=%s close_ok=%s",
+        email,
+        profile_id,
+        closed,
+    )
+    return {
+        "ok": True,
+        "profile_id": profile_id,
+        "already_released": already_released,
+        "closed": bool(closed),
+        "deleted": True,
+    }
+
+
 def _extra_from_account(account: dict) -> dict:
     raw = account.get("extra_json")
     try:

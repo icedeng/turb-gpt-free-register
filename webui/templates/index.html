@@ -871,6 +871,11 @@
       color: #606266; font-size: 13px; white-space: nowrap;
       min-height: 32px; padding: 0 4px;
     }
+    .accounts-filter-v2 .acc-v2-inline select {
+      min-height: 30px; border: 1px solid #dcdfe6; border-radius: 6px;
+      background: #fff; color: #606266; padding: 0 8px; font: inherit;
+      font-size: 13px; cursor: pointer;
+    }
     .accounts-filter-v2 .acc-v2-toggle {
       min-height: 32px; padding: 0 12px; border-radius: 6px;
       border: 1px solid #dcdfe6; background: #fff; color: #606266;
@@ -2023,6 +2028,14 @@
           </label>
           <button type="button" class="acc-v2-toggle" id="showArchivedAccountsV2" aria-pressed="false" title="默认只显示未归档账号；开启后单独查看归档账号">查看归档</button>
           <button type="button" class="acc-v2-toggle" id="showPlusAccountsOnlyV2" aria-pressed="false" title="只查询/显示已开通 Plus 的账号">已开通Plus</button>
+          <label class="acc-v2-inline" title="按套餐查询得到的 Plus 试用资格筛选">套餐试用
+            <select id="accountTrialFilterV2" aria-label="套餐试用筛选">
+              <option value="">全部</option>
+              <option value="eligible">可试用</option>
+              <option value="ineligible">不可试用</option>
+              <option value="unknown">未查询</option>
+            </select>
+          </label>
           <button type="button" class="jobs-tb-btn" id="btnRefreshAccountsV2" title="重新加载当前筛选条件和当前页账号列表">刷新账号</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnCheckSelectedLiveTopV2" onclick="checkSelectedLive()" title="重新登录选中账号；成功且未封号则标记正常，并刷新最新 AT/accessToken">查活</button>
 
@@ -2334,6 +2347,7 @@ let ACCOUNTS_TOTAL = 0;
 let OUTLOOK_TOTAL = 0;
 let SHOW_ARCHIVED_ACCOUNTS = false;
 let SHOW_PLUS_ACCOUNTS_ONLY = false;
+let ACCOUNT_TRIAL_FILTER = '';
 const ACCOUNT_SELECTED = new Set();
 const OUTLOOK_SELECTED = new Set();
 let JOBS = [];
@@ -2993,9 +3007,10 @@ async function loadAccounts() {
   try {
     const archived = SHOW_ARCHIVED_ACCOUNTS ? 'only' : '0';
     const plan = SHOW_PLUS_ACCOUNTS_ONLY ? 'plus' : '';
+    const trial = ACCOUNT_TRIAL_FILTER;
     const q = getAccountsQuery();
     const p = PAGERS.accounts;
-    const res = await api(`/api/accounts?paged=1&page=${encodeURIComponent(p.page)}&page_size=${encodeURIComponent(p.size)}&archived=${encodeURIComponent(archived)}&plan=${encodeURIComponent(plan)}&q=${encodeURIComponent(q)}`);
+    const res = await api(`/api/accounts?paged=1&page=${encodeURIComponent(p.page)}&page_size=${encodeURIComponent(p.size)}&archived=${encodeURIComponent(archived)}&plan=${encodeURIComponent(plan)}&trial=${encodeURIComponent(trial)}&q=${encodeURIComponent(q)}`);
     ACCOUNTS = res.items || [];
     ACCOUNTS_TOTAL = Number(res.total || ACCOUNTS.length || 0);
     const totalPages = Math.max(1, Math.ceil(ACCOUNTS_TOTAL / p.size));
@@ -3010,9 +3025,10 @@ async function pollAccountPlanStatuses() {
   try {
     const archived = SHOW_ARCHIVED_ACCOUNTS ? 'only' : '0';
     const plan = SHOW_PLUS_ACCOUNTS_ONLY ? 'plus' : '';
+    const trial = ACCOUNT_TRIAL_FILTER;
     const q = getAccountsQuery();
     const p = PAGERS.accounts;
-    const snapshot = await api(`/api/accounts/plan-check-status?page=${encodeURIComponent(p.page)}&page_size=${encodeURIComponent(p.size)}&archived=${encodeURIComponent(archived)}&plan=${encodeURIComponent(plan)}&q=${encodeURIComponent(q)}`);
+    const snapshot = await api(`/api/accounts/plan-check-status?page=${encodeURIComponent(p.page)}&page_size=${encodeURIComponent(p.size)}&archived=${encodeURIComponent(archived)}&plan=${encodeURIComponent(plan)}&trial=${encodeURIComponent(trial)}&q=${encodeURIComponent(q)}`);
     const items = snapshot.items || [];
     const accountById = new Map(ACCOUNTS.map(r => [Number(r.id), r]));
     const hasUnknown = items.some(item => !accountById.has(Number(item.id)));
@@ -3250,10 +3266,13 @@ function _tokenCellV2(r) {
   return `<span class="pill status-failed">无Token</span>${liveHtml}`;
 }
 function _accountsV2MoreMenu(r) {
+  const roxyProfileId = r.roxy_reopen_profile_id || '';
+  const roxyCloseDisabled = !roxyProfileId || r.roxy_reopen_status === 'closed';
   const parts = [
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
     `<button type="button" data-account-roxy-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 RoxyBrowser</button>`,
+    `<button type="button" class="danger" data-account-roxy-close="${esc(r.id)}"${roxyCloseDisabled ? ' disabled' : ''} title="${roxyCloseDisabled ? '当前没有账号页打开的 Roxy Profile 记录' : '关闭当前 Roxy 窗口并删除 Profile，释放窗口额度'}">关闭并释放 Roxy</button>`,
     `<button type="button" data-account-roxy-log="${esc(r.id)}" data-account-roxy-email="${esc(r.email || '')}" title="查看该账号最近一次 RoxyBrowser 重新打开运行日志">Roxy运行日志</button>`,
     `<button type="button" onclick="checkSelectedLive([Number('${esc(r.id)}')], this); return false;" title="重新登录该账号，成功则刷新最新 AT/accessToken">查活刷新AT</button>`,
     `<button type="button" data-account-live-log="${esc(r.email)}" title="查看该账号最近一次查活日志">查活日志</button>`,
@@ -3520,11 +3539,34 @@ async function onAccountsBodyClick(e) {
       });
       const method = r.auth_method === 'cookie' ? 'Cookie' : '重新登录';
       showToast(`RoxyBrowser 已打开（${method}，Cookie ${r.restored_cookies || 0} 个）`);
+      await loadAccounts();
     } catch (err) {
       showToast('重新打开失败: ' + err.message);
     } finally {
       roxyReopenBtn.disabled = false;
       roxyReopenBtn.textContent = oldText;
+    }
+    return;
+  }
+
+  const roxyCloseBtn = e.target.closest('[data-account-roxy-close]');
+  if (roxyCloseBtn) {
+    const id = Number(roxyCloseBtn.dataset.accountRoxyClose);
+    if (!confirm('确定关闭该账号当前打开的 RoxyBrowser，并删除 Profile 释放窗口额度吗？\n\n登录 Cookie 和环境快照会保留，下次仍可重新创建并自动登录。')) return;
+    roxyCloseBtn.disabled = true;
+    const oldText = roxyCloseBtn.textContent;
+    roxyCloseBtn.textContent = '正在关闭…';
+    try {
+      const r = await api(`/api/accounts/${encodeURIComponent(id)}/roxy-close`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      showToast(r.already_released ? '该账号没有待释放的 Roxy 窗口' : 'RoxyBrowser 已关闭，Profile 已删除并释放');
+      await loadAccounts();
+    } catch (err) {
+      showToast('关闭 RoxyBrowser 失败: ' + err.message);
+    } finally {
+      roxyCloseBtn.disabled = false;
+      roxyCloseBtn.textContent = oldText;
     }
     return;
   }
@@ -3734,6 +3776,15 @@ async function refreshAccountsList(btn) {
   const plusV2 = $('#showPlusAccountsOnlyV2');
   if (plusV2) plusV2.addEventListener('click', () => {
     applyAccountsPlusFilter(!SHOW_PLUS_ACCOUNTS_ONLY);
+  });
+  const trialV2 = $('#accountTrialFilterV2');
+  if (trialV2) trialV2.addEventListener('change', async () => {
+    ACCOUNT_TRIAL_FILTER = trialV2.value || '';
+    ACCOUNT_SELECTED.clear();
+    PAGERS.accounts.page = 1;
+    planStatusRevision = '';
+    await loadAccounts();
+    await pollAccountPlanStatuses();
   });
   const refreshV2 = $('#btnRefreshAccountsV2');
   if (refreshV2) refreshV2.addEventListener('click', () => refreshAccountsList(refreshV2));

@@ -560,9 +560,9 @@ class RoxyBrowserClient:
             created_by_run=created_by_run,
         )
 
-    def close_profile(self, profile_id: str) -> None:
+    def close_profile(self, profile_id: str, *, strict: bool = False) -> bool:
         if not profile_id:
-            return
+            return False
         path = str(_cfg.ROXY_CLOSE_PATH).format(profile_id=profile_id)
         try:
             body = {
@@ -576,12 +576,16 @@ class RoxyBrowserClient:
                 json_body=body if str(_cfg.ROXY_CLOSE_METHOD).upper() != "GET" else None,
             )
             logger.info("[Roxy] 已关闭环境：%s", profile_id)
+            return True
         except Exception as exc:
             logger.warning("[Roxy] 关闭环境失败：%s", exc)
+            if strict:
+                raise
+            return False
 
-    def delete_profile(self, profile_id: str) -> None:
+    def delete_profile(self, profile_id: str, *, strict: bool = False) -> bool:
         if not profile_id:
-            return
+            return False
         path = str(getattr(_cfg, "ROXY_DELETE_PATH", "/browser/delete")).format(profile_id=profile_id)
         method = str(getattr(_cfg, "ROXY_DELETE_METHOD", "POST") or "POST")
         try:
@@ -596,8 +600,12 @@ class RoxyBrowserClient:
                 json_body=body if method.upper() != "GET" else None,
             )
             logger.info("[Roxy] 已删除环境：%s", profile_id)
+            return True
         except Exception as exc:
             logger.warning("[Roxy] 删除环境失败：%s", exc)
+            if strict:
+                raise
+            return False
 
     def cleanup_profile(self, opened: RoxyOpenResult | None) -> None:
         """任务结束清理：关闭窗口；一号一环境时删除本轮创建的 Profile。"""
