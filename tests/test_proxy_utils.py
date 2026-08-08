@@ -16,6 +16,10 @@ class ProxyUtilsTests(unittest.TestCase):
                 "socks5://user:pass@proxy.example:1080",
             ),
             (
+                "user:pass:proxy.example:1080",
+                "socks5://user:pass@proxy.example:1080",
+            ),
+            (
                 "proxy.example:1080@user:pass",
                 "socks5://user:pass@proxy.example:1080",
             ),

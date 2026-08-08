@@ -256,7 +256,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "ROXY_PROXY_CHECK_CHANNEL", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "代理检测通道", "help": "写入 Roxy proxyInfo.checkChannel；留空则不传，默认 IPRust.io",
+        "label": "代理检测通道", "help": "写入 Roxy proxyInfo.checkChannel；建议留空以兼容不同版本；如需填写，请使用 Roxy /proxy/detect_channel 返回的 value URL",
     },
     {
         "key": "ROXY_DELETE_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
@@ -446,7 +446,7 @@ EDITABLE_FIELDS = [
     # ---- 代理池 ----
     {
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "支持 socks5://username:password@hostname:port、username:password@hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://",
+        "label": "代理池(每行一个)", "help": "支持 socks5://username:password@hostname:port、username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://，HTTP 代理请显式加 http://",
     },
     {
         "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",

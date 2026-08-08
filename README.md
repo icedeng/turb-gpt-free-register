@@ -376,9 +376,12 @@ PROXY_POOL = [
 
 ```text
 user:pass@hostname:port
+user:pass:hostname:port
 hostname:port:username:password
 hostname:port@username:password
 ```
+
+无协议格式默认按 SOCKS5 处理；如果代理服务商的该端口是 HTTP，请在行首显式添加 `http://`。
 
 Roxy 一号一环境开启 `ROXY_CREATE_USE_PROXY_POOL=True` 时，会从这里随机取代理写入 Roxy Profile。
 

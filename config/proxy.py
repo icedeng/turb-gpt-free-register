@@ -6,7 +6,7 @@
 
 代理格式：
     - 标准 URL：socks5://username:password@hostname:port
-    - 简写格式：username:password@hostname:port
+    - 简写格式：username:password@hostname:port、username:password:hostname:port
     - 兼容格式：hostname:port:username:password 或 hostname:port@username:password
     - 无协议的简写会自动补充 socks5://
 

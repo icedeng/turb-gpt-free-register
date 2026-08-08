@@ -98,8 +98,9 @@ ROXY_DEFAULT_OS_VERSION: str = ""
 #   True  = 每次创建环境时从 PROXY_POOL 随机取一个代理写入 proxyInfo
 ROXY_CREATE_USE_PROXY_POOL: bool = False
 
-# Roxy 代理检测通道；留空则不传 checkChannel。
-ROXY_PROXY_CHECK_CHANNEL: str = "IPRust.io"
+# Roxy 代理检测通道；留空则不传 checkChannel，兼容不同 Roxy 版本。
+# 如需指定，请填写当前 Roxy /proxy/detect_channel 返回的 value URL。
+ROXY_PROXY_CHECK_CHANNEL: str = ""
 
 # 没有 ROXY_PROFILE_ID 时创建环境的最小 payload；按你的 Roxy 版本字段调整。
 # 默认开启 ROXY_RANDOM_PROFILE_NAME_ON_CREATE，因此这里的 name 只是兜底值。
