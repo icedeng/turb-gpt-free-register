@@ -57,18 +57,14 @@ def is_reopening(email: str) -> bool:
 
 
 def _cleanup_reopen_resources(client: RoxyBrowserClient, opened: RoxyOpenResult | None, driver) -> None:
-    """重新打开流程结束后关闭浏览器并删除 Profile，不保留 Roxy 窗口。"""
-    if driver is not None:
-        try:
-            driver.quit()
-        except Exception as exc:
-            logger.warning("[Roxy重新打开] 退出 Selenium 失败：%s", exc)
-    if opened is None or not opened.profile_id:
-        return
-    # 重新打开使用的是一次性环境：即使复用了旧 Profile，也必须删除，避免窗口额度持续增长。
-    client.close_profile(opened.profile_id)
-    client.delete_profile(opened.profile_id)
-    logger.info("[Roxy重新打开] 已清理环境：profile=%s", opened.profile_id)
+    """重新打开流程结束后保留 Roxy 窗口和 Profile，由用户手动关闭。"""
+    # 这里的 driver 只是自动化连接；调用 quit() 会连带关闭用户刚打开的
+    # Roxy 窗口，因此必须保持连接对象和 Profile 不动，交给用户手动关闭。
+    if opened is not None and opened.profile_id:
+        logger.info(
+            "[Roxy重新打开] 已保留环境：profile=%s，窗口不会自动关闭，请在 RoxyBrowser 中手动关闭",
+            opened.profile_id,
+        )
 
 
 def _begin_reopen_log(email: str) -> tuple[str, logging.FileHandler | None]:
@@ -430,7 +426,7 @@ def _login_account_in_roxy(driver, account: dict) -> dict:
 
 
 def reopen_account_in_roxy(account: dict) -> dict:
-    """创建/复用一次性 Roxy 环境，恢复登录态后关闭并删除环境。"""
+    """创建/复用 Roxy 环境并恢复登录态，完成后保留窗口供用户使用。"""
     email = str(account.get("email") or "").strip()
     log_key, log_handler = _begin_reopen_log(email)
     logger.info("[Roxy重新打开] 开始：账号=%s", email)

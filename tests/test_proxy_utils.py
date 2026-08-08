@@ -92,16 +92,16 @@ class ProxyUtilsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ROXY_PROXY_POOL 为空"):
                 client.create_profile()
 
-    def test_reopen_cleanup_quits_closes_and_deletes_profile(self):
+    def test_reopen_cleanup_keeps_profile_and_window_open(self):
         client = MagicMock()
         driver = MagicMock()
         opened = SimpleNamespace(profile_id="temporary-profile")
 
         roxy_reopen._cleanup_reopen_resources(client, opened, driver)
 
-        driver.quit.assert_called_once_with()
-        client.close_profile.assert_called_once_with("temporary-profile")
-        client.delete_profile.assert_called_once_with("temporary-profile")
+        driver.quit.assert_not_called()
+        client.close_profile.assert_not_called()
+        client.delete_profile.assert_not_called()
 
 
 if __name__ == "__main__":
