@@ -66,6 +66,13 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
         self.assertEqual(fields["ROXY_LIVE_CHECK_HEADLESS"]["type"], "bool")
         self.assertEqual(fields["ROXY_LIVE_CHECK_DELETE_PROFILE"]["type"], "bool")
 
+    def test_roxy_webdriver_url_is_written_to_env_by_config_editor(self):
+        with patch("config.env_loader.write_env_values", return_value=["ROXY_WEBDRIVER_URL"]) as write:
+            result = config_editor.update_config({"ROXY_WEBDRIVER_URL": "http://192.168.0.90:9515"})
+
+        self.assertEqual(result["updated"], ["ROXY_WEBDRIVER_URL"])
+        write.assert_called_once_with({"ROXY_WEBDRIVER_URL": "http://192.168.0.90:9515"})
+
     def test_apply_env_overrides_does_not_let_blank_values_mask_defaults(self):
         old_loaded = env_loader._LOADED
         env_loader._LOADED = True
