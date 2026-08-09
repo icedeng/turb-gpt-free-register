@@ -579,6 +579,15 @@ def _account_matches_trial_filter(row: dict, trial_filter: str | None = None) ->
     return True
 
 
+def _email_pool_matches_status(row: dict, status: str | None = None) -> bool:
+    """邮箱池旧记录缺少 status 时按 available 处理。"""
+    wanted = str(status or "").strip().lower()
+    if not wanted:
+        return True
+    current = str(row.get("status") or "available").strip().lower()
+    return current == wanted
+
+
 def _decorate_outlook(row: dict, account_by_email: dict[str, dict] | None = None) -> dict:
     out = dict(row)
     out["copy_line"] = _outlook_line(out)
@@ -1820,7 +1829,7 @@ def list_outlook_pool(status: str | None = None, limit: int = 500) -> list[dict]
         }
         rows = _load_outlook()
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
         return [_decorate_outlook(r, account_by_email) for r in rows[:limit]]
 
@@ -1947,7 +1956,7 @@ def list_generic_api_email_pool(status: str | None = None, limit: int = 500) -> 
         }
         rows = _load_generic_api_emails()
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
         return [_decorate_generic_api_email(r, account_by_email) for r in rows[:limit]]
 
@@ -2547,7 +2556,7 @@ def list_domain_email_pool(status: str | None = None, limit: int = 500) -> list[
     with _LOCK:
         rows = sorted(_load_domain_pool(), key=lambda x: int(x.get("id") or 0), reverse=True)
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         return [dict(r) for r in rows[:limit]]
 
 

@@ -185,6 +185,12 @@ class ProxyUtilsTests(unittest.TestCase):
         self.assertTrue(db._account_matches_trial_filter({}, "unknown"))
         self.assertFalse(db._account_matches_trial_filter({"current_plan_type": "free", "plus_trial_eligible": "yes"}, "unknown"))
 
+    def test_email_pool_status_filter_treats_missing_status_as_available(self):
+        self.assertTrue(db._email_pool_matches_status({}, "available"))
+        self.assertFalse(db._email_pool_matches_status({}, "used"))
+        self.assertTrue(db._email_pool_matches_status({"status": "disabled"}, "disabled"))
+        self.assertTrue(db._email_pool_matches_status({"status": "FAILED"}, "failed"))
+
 
 if __name__ == "__main__":
     unittest.main()
