@@ -16,7 +16,7 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_DIR = _PROJECT_ROOT / "config"
-EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL"}
+EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL", "ROXY_PROXY_POOL"}
 
 
 # ============================================================
@@ -25,7 +25,7 @@ EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL"}
 #   bool   -> True/False
 #   int    -> 整数
 #   str    -> 带引号字符串
-#   list_str_multiline -> 多行字符串列表（PROXY_POOL 专用，整块替换）
+#   list_str_multiline -> 多行字符串列表（代理池等字段）
 # ============================================================
 
 EDITABLE_FIELDS = [
@@ -252,11 +252,15 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "ROXY_CREATE_USE_PROXY_POOL", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "创建环境使用代理池", "help": "创建 Roxy 环境时从配置页「代理池」随机取一个代理，写入 Roxy proxyInfo",
+        "label": "创建环境使用Roxy代理池", "help": "开启后每次创建 Roxy 环境都从下面的 RoxyBrowser 专用代理池随机取一个代理，并覆盖环境快照中的旧代理",
+    },
+    {
+        "key": "ROXY_PROXY_POOL", "file": "roxybrowser.py", "type": "list_str_multiline", "group": "RoxyBrowser",
+        "label": "Roxy代理池(每行一个)", "help": "仅供 RoxyBrowser 创建窗口使用；每行一个代理，支持 http://、socks5:// 及全部简写格式；与通用代理池互不影响",
     },
     {
         "key": "ROXY_PROXY_CHECK_CHANNEL", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "代理检测通道", "help": "写入 Roxy proxyInfo.checkChannel；留空则不传，默认 IPRust.io",
+        "label": "代理检测通道", "help": "写入 Roxy proxyInfo.checkChannel；建议留空以兼容不同版本；如需填写，请使用 Roxy /proxy/detect_channel 返回的 value URL",
     },
     {
         "key": "ROXY_DELETE_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
@@ -446,7 +450,7 @@ EDITABLE_FIELDS = [
     # ---- 代理池 ----
     {
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "每行一个代理 URL，留空行会被忽略；为空则不使用代理",
+        "label": "代理池(每行一个)", "help": "支持 socks5:// 或 http:// + username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://",
     },
     {
         "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",

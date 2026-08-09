@@ -10,6 +10,7 @@ Flask 本地控制台。
 所有接口返回 JSON；前端是单文件 templates/index.html（原生 JS + fetch）。
 默认绑定 127.0.0.1，仅本地访问。
 """
+import json
 import logging
 import threading
 import time
@@ -87,7 +88,20 @@ def _compact_account_for_list(row: dict) -> dict:
         "totp_enabled": bool(row.get("totp_secret")),
         "codex_agent_has_token": bool(str(row.get("codex_agent_token") or "").strip()),
     }
-
+    try:
+        raw_extra = row.get("extra_json")
+        extra = json.loads(raw_extra) if isinstance(raw_extra, str) and raw_extra else (raw_extra or {})
+        state = extra.get("roxy_auth_state") if isinstance(extra, dict) else {}
+        reopen = state.get("reopen") if isinstance(state, dict) else {}
+        if isinstance(reopen, dict):
+            if reopen.get("profile_id"):
+                out["roxy_reopen_profile_id"] = str(reopen["profile_id"])
+            if reopen.get("status"):
+                out["roxy_reopen_status"] = str(reopen["status"])
+            if reopen.get("opened_at"):
+                out["roxy_reopen_opened_at"] = str(reopen["opened_at"])
+    except Exception:
+        pass
     # 这些是列表固定列直接展示字段。
     for key in (
         "user_name", "email_source", "note", "archived", "created_at",
@@ -283,6 +297,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         limit = request.args.get("limit", default=500, type=int)
         archived = str(request.args.get("archived", default="0") or "0").lower()
         plan_filter = str(request.args.get("plan", default="") or "").lower()
+        trial_filter = str(request.args.get("trial", default="") or "").lower()
         q = str(request.args.get("q", default="") or "").strip()
         date_from = str(request.args.get("date_from", default="") or "").strip() or None
         date_to = str(request.args.get("date_to", default="") or "").strip() or None
@@ -294,11 +309,11 @@ def create_app(auth_code: str | None = None) -> Flask:
             page = max(1, int(page_arg or 1))
             page_size = max(1, min(500, int(page_size_arg or limit or 50)))
             offset = (page - 1) * page_size
-            result = db.list_accounts_page(limit=page_size, offset=offset, archived=archived, plan_filter=plan_filter, q=q, date_from=date_from, date_to=date_to)
+            result = db.list_accounts_page(limit=page_size, offset=offset, archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter, date_from=date_from, date_to=date_to)
             result["items"] = [_compact_account_for_list(r) for r in (result.get("items") or [])]
             result.update({"ok": True, "page": page, "page_size": page_size, "compact": True})
             return jsonify(result)
-        return jsonify(db.list_accounts(limit=limit, archived=archived, plan_filter=plan_filter, q=q, date_from=date_from, date_to=date_to))
+        return jsonify(db.list_accounts(limit=limit, archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter, date_from=date_from, date_to=date_to))
 
     @app.get("/api/accounts/plan-check-status")
     def api_account_plan_check_status():
@@ -306,6 +321,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         limit = request.args.get("limit", default=5000, type=int)
         archived = str(request.args.get("archived", default="0") or "0").lower()
         plan_filter = str(request.args.get("plan", default="") or "").lower()
+        trial_filter = str(request.args.get("trial", default="") or "").lower()
         q = str(request.args.get("q", default="") or "").strip()
         page_arg = request.args.get("page", default=None, type=int)
         page_size_arg = request.args.get("page_size", default=None, type=int)
@@ -313,10 +329,10 @@ def create_app(auth_code: str | None = None) -> Flask:
             page = max(1, int(page_arg or 1))
             page_size = max(1, min(500, int(page_size_arg or limit or 50)))
             offset = (page - 1) * page_size
-            snapshot = db.list_account_plan_check_statuses(limit=page_size, offset=offset, archived=archived, plan_filter=plan_filter, q=q)
+            snapshot = db.list_account_plan_check_statuses(limit=page_size, offset=offset, archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter)
             snapshot.update({"page": page, "page_size": page_size})
         else:
-            snapshot = db.list_account_plan_check_statuses(limit=max(1, min(5000, limit)), archived=archived, plan_filter=plan_filter, q=q)
+            snapshot = db.list_account_plan_check_statuses(limit=max(1, min(5000, limit)), archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter)
         snapshot["queue"] = plan_check_service.queue_settings()
         return jsonify(snapshot)
 
@@ -457,6 +473,79 @@ def create_app(auth_code: str | None = None) -> Flask:
         if not updated:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         return jsonify({"ok": True, "updated": True, "id": acc_id, "note": note})
+
+    @app.post("/api/accounts/<int:acc_id>/roxy-reopen")
+    def api_account_roxy_reopen(acc_id: int):
+        """创建/复用 RoxyBrowser 环境，恢复该账号保存的 ChatGPT 登录态。"""
+        acc = db.get_account(acc_id)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        try:
+            from core.roxy_reopen import reopen_account_in_roxy
+            result = reopen_account_in_roxy(acc)
+            auth_state = result.pop("_auth_state", None)
+            access_token = result.pop("_access_token", None)
+            profile_detail = result.pop("_profile_detail", None)
+            db.update_account_roxy_reopen(
+                acc_id,
+                profile_id=result.get("profile_id"),
+                auth_state=auth_state,
+                access_token=access_token,
+                profile_detail=profile_detail,
+            )
+            return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
+        except Exception as exc:
+            logger.exception("重新打开 RoxyBrowser 失败: account_id=%s", acc_id)
+            try:
+                db.update_account_roxy_reopen(acc_id, error=f"{type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            status = 400 if any(x in str(exc) for x in ("账号缺少邮箱", "没有保存密码")) else 500
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), status
+
+    @app.post("/api/accounts/<int:acc_id>/roxy-close")
+    def api_account_roxy_close(acc_id: int):
+        """关闭账号页打开的 Roxy 窗口并删除 Profile，释放窗口额度。"""
+        acc = db.get_account(acc_id)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        try:
+            from core.roxy_reopen import close_and_release_account_roxy
+            result = close_and_release_account_roxy(acc)
+            db.update_account_roxy_released(acc_id, profile_id=result.get("profile_id"))
+            return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
+        except Exception as exc:
+            logger.exception("关闭并释放 RoxyBrowser 失败: account_id=%s", acc_id)
+            try:
+                db.update_account_roxy_released(acc_id, error=f"{type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.get("/api/accounts/<int:acc_id>/roxy-reopen-log")
+    def api_account_roxy_reopen_log(acc_id: int):
+        """读取该账号最近一次 RoxyBrowser 重新打开日志。"""
+        acc = db.get_account(acc_id)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        email = str(acc.get("email") or "").strip()
+        if not email:
+            return jsonify({"ok": False, "error": "账号邮箱为空"}), 400
+        from core import roxy_reopen
+        path = roxy_reopen.log_path(email)
+        if not path.exists():
+            return jsonify({"ok": True, "log": "", "running": roxy_reopen.is_reopening(email)})
+        max_bytes = 80_000
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            content = f.read().decode("utf-8", errors="replace")
+        return jsonify({
+            "ok": True,
+            "log": content,
+            "running": roxy_reopen.is_reopening(email),
+        })
 
     @app.post("/api/accounts/note-bulk")
     def api_accounts_note_bulk():

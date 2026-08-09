@@ -317,7 +317,8 @@ class CloakSeleniumDriver:
 
 
 def _normalize_proxy(proxy: str | None) -> str | None:
-    proxy = str(proxy or "").strip()
+    from core.proxy_utils import normalize_proxy_url
+    proxy = normalize_proxy_url(proxy)
     if not proxy:
         return None
     return proxy.replace("socks5h://", "socks5://")

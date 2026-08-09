@@ -552,6 +552,42 @@ def _account_matches_plan_filter(row: dict, plan_filter: str | None = None) -> b
     return plan == f
 
 
+def _account_matches_trial_filter(row: dict, trial_filter: str | None = None) -> bool:
+    """按套餐试用资格过滤；试用资格只适用于 Free 套餐。"""
+    f = str(trial_filter or "").strip().lower()
+    if not f or f in {"all", "any"}:
+        return True
+    plan = str(row.get("current_plan_type") or row.get("plan_type") or "").strip().lower()
+    is_free = plan == "free"
+    value = row.get("plus_trial_eligible")
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            value = True
+        elif normalized in {"false", "0", "no", "n", "off"}:
+            value = False
+        else:
+            value = None
+    elif not isinstance(value, bool):
+        value = None
+    if f in {"eligible", "trial", "可试用"}:
+        return is_free and value is True
+    if f in {"ineligible", "not_eligible", "unavailable", "不可试用"}:
+        return is_free and value is False
+    if f in {"unknown", "unchecked", "未查询"}:
+        return (not plan or is_free) and value is None
+    return True
+
+
+def _email_pool_matches_status(row: dict, status: str | None = None) -> bool:
+    """邮箱池旧记录缺少 status 时按 available 处理。"""
+    wanted = str(status or "").strip().lower()
+    if not wanted:
+        return True
+    current = str(row.get("status") or "available").strip().lower()
+    return current == wanted
+
+
 def _decorate_outlook(row: dict, account_by_email: dict[str, dict] | None = None) -> dict:
     out = dict(row)
     out["copy_line"] = _outlook_line(out)
@@ -1102,7 +1138,14 @@ def _parse_iso_dt(value: str | None, end_of_day: bool = False) -> datetime | Non
         return None
 
 
-def _filtered_decorated_accounts(archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+def _filtered_decorated_accounts(
+    archived: str | bool | None = False,
+    plan_filter: str | None = None,
+    q: str | None = None,
+    trial_filter: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
     rows = _load_accounts()
     if archived in (True, "1", "true", "yes", "only"):
         rows = [r for r in rows if bool(r.get("archived"))]
@@ -1112,6 +1155,7 @@ def _filtered_decorated_accounts(archived: str | bool | None = False, plan_filte
         rows = [r for r in rows if not bool(r.get("archived"))]
     decorated = [_decorate_account(r) for r in rows]
     decorated = [r for r in decorated if _account_matches_plan_filter(r, plan_filter)]
+    decorated = [r for r in decorated if _account_matches_trial_filter(r, trial_filter)]
     decorated = [r for r in decorated if _account_matches_query(r, q)]
     # 按创建时间筛选（date_from/date_to 为 ISO 字符串或 YYYY-MM-DD）
     if date_from or date_to:
@@ -1132,7 +1176,7 @@ def _filtered_decorated_accounts(archived: str | bool | None = False, plan_filte
     return sorted(decorated, key=lambda x: int(x.get("id") or 0), reverse=True)
 
 
-def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None) -> dict:
+def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, trial_filter: str | None = None) -> dict:
     """返回不含 Token/邮箱密码的套餐查询轻量状态快照。"""
     fields = (
         "id", "email", "archived",
@@ -1155,7 +1199,7 @@ def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archive
         "codex_agent_sub2api_mode", "codex_agent_sub2api_total",
     )
     with _LOCK:
-        all_rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q)
+        all_rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter)
         total = len(all_rows)
         limit = max(1, int(limit))
         offset = max(0, int(offset or 0))
@@ -1205,15 +1249,15 @@ def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archive
         return {"items": items, "total": total, "offset": offset, "limit": limit, "revision": f"{total}:{latest}:{revision_sig}"}
 
 
-def list_accounts(limit: int = 500, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+def list_accounts(limit: int = 500, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, trial_filter: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
     with _LOCK:
-        rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q, date_from=date_from, date_to=date_to)
+        rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter, date_from=date_from, date_to=date_to)
         return rows[max(0, int(offset or 0)): max(0, int(offset or 0)) + max(1, int(limit))]
 
 
-def list_accounts_page(limit: int = 50, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> dict:
+def list_accounts_page(limit: int = 50, offset: int = 0, archived: str | bool | None = False, plan_filter: str | None = None, q: str | None = None, trial_filter: str | None = None, date_from: str | None = None, date_to: str | None = None) -> dict:
     with _LOCK:
-        rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q, date_from=date_from, date_to=date_to)
+        rows = _filtered_decorated_accounts(archived=archived, plan_filter=plan_filter, q=q, trial_filter=trial_filter, date_from=date_from, date_to=date_to)
         total = len(rows)
         limit = max(1, int(limit))
         offset = max(0, int(offset or 0))
@@ -1245,6 +1289,107 @@ def update_account_note(acc_id: int, note: str) -> bool:
         row["note"] = str(note or "")
         row["note_updated_at"] = now
         row["updated_at"] = now
+        _save_accounts(rows)
+        return True
+
+
+def update_account_roxy_reopen(
+    acc_id: int,
+    *,
+    profile_id: str | None = None,
+    error: str | None = None,
+    auth_state: dict | None = None,
+    access_token: str | None = None,
+    profile_detail: dict | None = None,
+) -> bool:
+    """保存账号最近一次 RoxyBrowser 重新打开的环境及错误摘要。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        raw = row.get("extra_json")
+        try:
+            extra = json.loads(raw) if isinstance(raw, str) and raw else (raw if isinstance(raw, dict) else {})
+        except Exception:
+            extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+        state = auth_state if isinstance(auth_state, dict) else extra.get("roxy_auth_state")
+        if not isinstance(state, dict):
+            state = {}
+        reopen = state.get("reopen")
+        if not isinstance(reopen, dict):
+            reopen = {}
+        if profile_id:
+            reopen["profile_id"] = str(profile_id)
+            reopen["opened_at"] = _now()
+            reopen["status"] = "open"
+            reopen.pop("closed_at", None)
+            reopen.pop("released_profile_id", None)
+            reopen.pop("error", None)
+        if error:
+            reopen["error"] = str(error)[:500]
+            reopen["error_at"] = _now()
+        state["reopen"] = reopen
+        extra["roxy_auth_state"] = state
+        if isinstance(profile_detail, dict) and profile_detail:
+            roxy = extra.get("roxybrowser")
+            if not isinstance(roxy, dict):
+                roxy = {}
+            roxy["profile_detail"] = profile_detail
+            if profile_id:
+                roxy["profile_id"] = str(profile_id)
+            extra["roxybrowser"] = roxy
+        row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+        if access_token:
+            row["access_token"] = str(access_token)
+        row["updated_at"] = _now()
+        _save_accounts(rows)
+        return True
+
+
+def update_account_roxy_released(acc_id: int, *, profile_id: str | None = None, error: str | None = None) -> bool:
+    """记录账号页 Roxy Profile 已关闭并删除；保留登录态和环境快照供下次重建。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        raw = row.get("extra_json")
+        try:
+            extra = json.loads(raw) if isinstance(raw, str) and raw else (raw if isinstance(raw, dict) else {})
+        except Exception:
+            extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+        state = extra.get("roxy_auth_state")
+        if not isinstance(state, dict):
+            state = {}
+        reopen = state.get("reopen")
+        if not isinstance(reopen, dict):
+            reopen = {}
+        if error:
+            reopen["status"] = "release_failed"
+            reopen["error"] = str(error)[:500]
+            reopen["error_at"] = _now()
+        else:
+            released_id = str(profile_id or reopen.get("profile_id") or "").strip()
+            if released_id:
+                reopen["released_profile_id"] = released_id
+            reopen.pop("profile_id", None)
+            reopen["status"] = "closed"
+            reopen["closed_at"] = _now()
+            reopen.pop("error", None)
+            reopen.pop("error_at", None)
+            roxy = extra.get("roxybrowser")
+            if isinstance(roxy, dict):
+                roxy.pop("profile_id", None)
+                extra["roxybrowser"] = roxy
+        state["reopen"] = reopen
+        extra["roxy_auth_state"] = state
+        row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+        row["updated_at"] = _now()
         _save_accounts(rows)
         return True
 
@@ -1726,7 +1871,7 @@ def list_outlook_pool(status: str | None = None, limit: int = 500) -> list[dict]
         }
         rows = _load_outlook()
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
         return [_decorate_outlook(r, account_by_email) for r in rows[:limit]]
 
@@ -1853,7 +1998,7 @@ def list_generic_api_email_pool(status: str | None = None, limit: int = 500) -> 
         }
         rows = _load_generic_api_emails()
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
         return [_decorate_generic_api_email(r, account_by_email) for r in rows[:limit]]
 
@@ -2492,7 +2637,7 @@ def list_domain_email_pool(status: str | None = None, limit: int = 500) -> list[
     with _LOCK:
         rows = sorted(_load_domain_pool(), key=lambda x: int(x.get("id") or 0), reverse=True)
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            rows = [r for r in rows if _email_pool_matches_status(r, status)]
         return [dict(r) for r in rows[:limit]]
 
 

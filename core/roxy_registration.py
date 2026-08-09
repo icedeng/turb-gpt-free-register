@@ -1984,7 +1984,13 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
     driver = None
     create_acknowledged = False
     openai_password: str | None = None
+    roxy_profile_detail: dict = {}
     try:
+        try:
+            roxy_profile_detail = client.get_profile_detail(opened.profile_id)
+            logger.info("[Roxy注册] 已保存 Profile 完整环境配置：fields=%s", len(roxy_profile_detail))
+        except Exception as exc:
+            logger.warning("[Roxy注册] 获取 Profile 完整环境配置失败，继续注册：%s", exc)
         driver = _build_driver(opened)
         _center_browser_window(driver)
         driver.set_page_load_timeout(int(_cfg.ROXY_SELENIUM_TIMEOUT))
@@ -2095,6 +2101,20 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
         logger.info("[Roxy注册] 已拿到 accessToken：%s", email)
         _check_manual_stop()
 
+        # 注册环境会在流程结束时关闭并删除；保存 Cookie/Web Storage，后续账号页才能
+        # 创建新的 Roxy 环境并恢复登录态。必须在 Codex 流程清理浏览器状态前抓取。
+        from core.roxy_reopen import capture_auth_state
+        roxy_auth_state = capture_auth_state(driver)
+        if not roxy_auth_state.get("cookies"):
+            logger.warning("[Roxy注册] 未抓取到可恢复的 Cookie，账号仍会保存但无法保证重新打开自动登录")
+        try:
+            refreshed_profile_detail = client.get_profile_detail(opened.profile_id)
+            if refreshed_profile_detail:
+                roxy_profile_detail = refreshed_profile_detail
+                logger.info("[Roxy注册] 已刷新登录后的 Profile 环境快照：fields=%s", len(roxy_profile_detail))
+        except Exception as exc:
+            logger.warning("[Roxy注册] 刷新登录后的 Profile 环境快照失败，保留打开前快照：%s", exc)
+
         if _twofa_cfg.ENABLE_2FA:
             logger.warning("[Roxy注册] 当前 Roxy 自动化路径暂不执行 2FA 设置，已跳过")
         totp_secret = None
@@ -2136,7 +2156,12 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
                 "user": session_info.get("user"),
                 "account": session_info.get("account"),
                 "expires": session_info.get("expires"),
-                "roxybrowser": {"profile_id": opened.profile_id, "open_result": opened.raw},
+                "roxybrowser": {
+                    "profile_id": opened.profile_id,
+                    "open_result": opened.raw,
+                    "profile_detail": roxy_profile_detail,
+                },
+                "roxy_auth_state": roxy_auth_state,
                 "registration_password": openai_password,
                 "codex": codex_result,
             },

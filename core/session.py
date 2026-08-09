@@ -10,6 +10,7 @@ import time
 import uuid
 from urllib.parse import urlparse
 from curl_cffi.requests import Session
+from core.proxy_utils import normalize_proxy_url
 
 from config import (
     USER_AGENT, SEC_CH_UA, SEC_CH_UA_PLATFORM, SEC_CH_UA_MOBILE,
@@ -49,7 +50,7 @@ class BrowserSession:
         if proxy is None:
             self.proxy = pick_proxy()
         else:
-            self.proxy = proxy
+            self.proxy = normalize_proxy_url(proxy)
 
         # 生成设备ID（oai-did），整个注册流程复用
         self.device_id = str(uuid.uuid4())
