@@ -48,6 +48,16 @@ def _build_driver(opened: RoxyOpenResult):
         # 页面里长轮询/风控脚本偶尔会让 driver.get 等到超时；eager 只等 DOMContentLoaded。
         options.page_load_strategy = "eager"
         options.add_experimental_option("debuggerAddress", opened.debugger_address)
+        remote_webdriver_url = str(getattr(_cfg, "ROXY_WEBDRIVER_URL", "") or "").strip()
+        if remote_webdriver_url:
+            # Roxy 与 WebUI 可能不在同一台机器：Chrome 调试地址中的 127.0.0.1
+            # 是 Roxy/ChromeDriver 所在 Windows 主机的地址，不能改成 WebUI 主机；
+            # RemoteWebDriver 会把该地址交给 Windows 上的 Supervisor 处理。
+            logger.info("[Roxy] 使用远程 ChromeDriver Supervisor=%s", remote_webdriver_url)
+            driver = RemoteWebDriver(command_executor=remote_webdriver_url, options=options)
+            _apply_browser_automation_mask(driver)
+            return driver
+
         driver_path = ""
         try:
             raw_data = opened.raw.get("data") if isinstance(opened.raw, dict) else {}

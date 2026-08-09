@@ -219,6 +219,10 @@ EDITABLE_FIELDS = [
         "label": "无头启动窗口", "help": "打开 Roxy 环境时向 /browser/open 传 headless；False=显示窗口，True=无头启动",
     },
     {
+        "key": "ROXY_WEBDRIVER_URL", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
+        "label": "远程 ChromeDriver 地址", "help": "Windows Roxy 与 Linux WebUI 分机部署时填写 ChromeDriver Supervisor 地址，例如 http://192.168.0.90:9515",
+    },
+    {
         "key": "ACCOUNT_LIVENESS_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "账号认证",
         "label": "账号查活驱动", "help": "roxy=临时 Roxy Profile 登录；protocol=兼容旧协议登录；same_as_registration=跟随注册驱动",
     },

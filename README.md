@@ -31,6 +31,7 @@ ChatGPT / OpenAI 账号自动注册与 Codex OAuth 授权工具。当前项目�
   - `REGISTRATION_DRIVER = "skyvern"`
 - 支持 RoxyBrowser 一号一环境：自动创建、打开、关闭、删除 Roxy Profile。
 - 支持 Roxy 无头启动：`ROXY_OPEN_HEADLESS=True`。
+- 支持 Windows Roxy + Linux WebUI 分机部署：通过 `ROXY_WEBDRIVER_URL` 连接 Windows ChromeDriver Supervisor。
 - 已注册账号查活默认使用临时 Roxy Profile：优先恢复 Cookie，失效时回退密码/邮箱 OTP，完成后自动关闭并删除环境；可用 `ACCOUNT_LIVENESS_DRIVER=protocol` 兼容旧协议模式。
 - 支持 CloakBrowser：免费 binary、无头模式、humanize、固定 fingerprint seed、按出口 IP 自动匹配语言/时区/WebRTC。
 - Roxy / Cloak 浏览器注册已兼容：

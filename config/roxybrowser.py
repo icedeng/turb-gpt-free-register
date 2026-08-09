@@ -65,6 +65,11 @@ ROXY_LIVE_CHECK_DELETE_PROFILE: bool = True
 # 打开浏览器时附加参数；会合并到 /browser/open 请求体，优先级高于默认值。
 ROXY_OPEN_EXTRA_PARAMS: dict = {}
 
+# 远程 ChromeDriver Supervisor 地址。
+# 当 WebUI 在 Linux、RoxyBrowser 在 Windows 时，使用该地址创建 Selenium RemoteWebDriver；
+# Roxy /browser/open 返回的 127.0.0.1 调试地址仍由 Windows 上的 ChromeDriver 使用。
+ROXY_WEBDRIVER_URL: str = env_str("ROXY_WEBDRIVER_URL", "")
+
 # Selenium 行为
 ROXY_SELENIUM_TIMEOUT: int = 90
 ROXY_KEEP_BROWSER_OPEN: bool = False
@@ -125,4 +130,4 @@ ROXY_PROFILE_CREATE_PAYLOAD: dict = {
 ROXY_CODEX_CALLBACK_TIMEOUT: int = 180
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ACCOUNT_LIVENESS_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_DELETE_PROFILE': 'bool', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_PROFILE_NAME_PREFIX': 'str', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})
+apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ACCOUNT_LIVENESS_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_DELETE_PROFILE': 'bool', 'ROXY_WEBDRIVER_URL': 'str', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})

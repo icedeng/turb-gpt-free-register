@@ -62,6 +62,7 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
     def test_roxy_liveness_fields_are_editable(self):
         fields = {item["key"]: item for item in config_editor.EDITABLE_FIELDS}
         self.assertEqual(fields["ACCOUNT_LIVENESS_DRIVER"]["group"], "账号认证")
+        self.assertEqual(fields["ROXY_WEBDRIVER_URL"]["group"], "RoxyBrowser")
         self.assertEqual(fields["ROXY_LIVE_CHECK_HEADLESS"]["type"], "bool")
         self.assertEqual(fields["ROXY_LIVE_CHECK_DELETE_PROFILE"]["type"], "bool")
 
