@@ -18,6 +18,9 @@ from config.env_loader import env_str, apply_env_overrides
 #   "skyvern"      = Skyvern Browser Sessions + Playwright
 REGISTRATION_DRIVER: str = "roxy"
 
+# 已注册账号认证/查活驱动：roxy / protocol / same_as_registration。
+ACCOUNT_LIVENESS_DRIVER: str = "roxy"
+
 # RoxyBrowser 本地 API
 ROXY_API_BASE: str = "http://127.0.0.1:50100"
 ROXY_API_TOKEN: str = env_str("ROXY_API_TOKEN", "")
@@ -54,6 +57,10 @@ ROXY_CREATE_METHOD: str = "POST"
 #   False = 显示 Roxy 浏览器窗口（便于观察/调试）
 #   True  = 无头启动，不显示窗口（如果当前 Roxy 版本支持 headless）
 ROXY_OPEN_HEADLESS: bool = False
+
+# 后台账号查活专用设置。查活使用临时 Profile，完成后由服务层清理。
+ROXY_LIVE_CHECK_HEADLESS: bool = True
+ROXY_LIVE_CHECK_DELETE_PROFILE: bool = True
 
 # 打开浏览器时附加参数；会合并到 /browser/open 请求体，优先级高于默认值。
 ROXY_OPEN_EXTRA_PARAMS: dict = {}
@@ -118,4 +125,4 @@ ROXY_PROFILE_CREATE_PAYLOAD: dict = {
 ROXY_CODEX_CALLBACK_TIMEOUT: int = 180
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_PROFILE_NAME_PREFIX': 'str', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})
+apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ACCOUNT_LIVENESS_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_DELETE_PROFILE': 'bool', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_PROFILE_NAME_PREFIX': 'str', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})

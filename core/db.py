@@ -1410,6 +1410,14 @@ def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
         row["live_check_ok"] = ok
         row["live_checked_at"] = result.get("checked_at") or now
         row["live_check_error"] = None if ok else result.get("error")
+        if result.get("auth_driver"):
+            row["live_check_driver"] = str(result.get("auth_driver"))
+        if result.get("auth_method"):
+            row["live_check_method"] = str(result.get("auth_method"))
+        if result.get("auth_profile_id"):
+            row["live_check_profile_id"] = str(result.get("auth_profile_id"))
+        if result.get("proxy_used") is not None:
+            row["live_check_proxy_used"] = result.get("proxy_used")
         row["updated_at"] = now
 
         if status == "deactivated":
@@ -1435,6 +1443,35 @@ def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
                 row["device_id"] = result.get("device_id")
             if result.get("proxy_used"):
                 row["live_check_proxy_used"] = result.get("proxy_used")
+            auth_state = result.get("auth_state")
+            if isinstance(auth_state, dict) and result.get("auth_driver") == "roxy":
+                auth_state = dict(auth_state)
+                raw_extra = row.get("extra_json")
+                try:
+                    extra = json.loads(raw_extra) if isinstance(raw_extra, str) and raw_extra else (raw_extra if isinstance(raw_extra, dict) else {})
+                except Exception:
+                    extra = {}
+                if not isinstance(extra, dict):
+                    extra = {}
+                previous_state = extra.get("roxy_auth_state")
+                if isinstance(previous_state, dict):
+                    # 临时 Selenium 连接偶发无法读取 Cookie 时，不要用空快照覆盖
+                    # 上一次可用登录态；下次查活仍可优先尝试 Cookie 恢复。
+                    if not auth_state.get("cookies") and previous_state.get("cookies"):
+                        for key in ("cookies", "storage", "storage_origin", "captured_at"):
+                            if not auth_state.get(key) and previous_state.get(key):
+                                auth_state[key] = previous_state[key]
+                if isinstance(previous_state, dict) and isinstance(previous_state.get("reopen"), dict):
+                    # 保留账号页当前打开的 Profile 记录；查活临时 Profile 不应覆盖它。
+                    auth_state["reopen"] = dict(previous_state["reopen"])
+                extra["roxy_auth_state"] = auth_state
+                extra["roxy_live_check"] = {
+                    "checked_at": result.get("checked_at") or now,
+                    "auth_method": result.get("auth_method") or "",
+                    "profile_id": result.get("auth_profile_id") or "",
+                    "restored_cookies": int(result.get("restored_cookies") or 0),
+                }
+                row["extra_json"] = json.dumps(extra, ensure_ascii=False)
             row["live_check_error"] = None
 
         row["copy_line"] = _account_line(row)

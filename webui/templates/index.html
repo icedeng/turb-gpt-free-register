@@ -3391,12 +3391,18 @@ function _tokenCellV2(r) {
   const live = r.live_check_status || '';
   const liveErr = r.live_check_error || '';
   const liveAt = r.live_checked_at || '';
+  const liveDriver = r.live_check_driver === 'roxy' ? 'Roxy' : (r.live_check_driver === 'protocol' ? '协议' : (r.live_check_driver || ''));
+  const methodLabels = {cookie:'Cookie', password:'密码', email_otp:'邮箱 OTP', email_cookie_or_existing:'已有会话'};
+  const liveMethod = methodLabels[r.live_check_method] || r.live_check_method || '';
+  const liveMode = [liveDriver, liveMethod].filter(Boolean).join(' / ');
+  const liveSuffix = liveMode ? ` (${esc(liveMode)})` : '';
+  const liveTitle = [liveErr || liveAt, r.live_check_proxy_used ? `代理: ${r.live_check_proxy_used}` : ''].filter(Boolean).join('\n');
   let liveHtml = '';
-  if (live === 'live') liveHtml = `<div class="acc-v2-sub" title="${esc(liveAt)}">查活: 正常</div>`;
+  if (live === 'live') liveHtml = `<div class="acc-v2-sub" title="${esc(liveTitle)}">查活: 正常${liveSuffix}</div>`;
   else if (live === 'queued') liveHtml = `<div class="acc-v2-sub" title="${esc(liveAt)}" style="color:#e6a23c">查活: 排队</div>`;
   else if (live === 'running') liveHtml = `<div class="acc-v2-sub" title="${esc(liveAt)}" style="color:#e6a23c">查活: 运行中</div>`;
-  else if (live === 'deactivated') liveHtml = `<div class="acc-v2-sub" title="${esc(liveErr || liveAt)}" style="color:#f56c6c">查活: 已废</div>`;
-  else if (live === 'failed') liveHtml = `<div class="acc-v2-sub" title="${esc(liveErr || liveAt)}" style="color:#e6a23c">查活: 失败</div>`;
+  else if (live === 'deactivated') liveHtml = `<div class="acc-v2-sub" title="${esc(liveTitle)}" style="color:#f56c6c">查活: 已废${liveSuffix}</div>`;
+  else if (live === 'failed') liveHtml = `<div class="acc-v2-sub" title="${esc(liveTitle)}" style="color:#e6a23c">查活: 失败${liveSuffix}</div>`;
   if (r.has_access_token) {
     return `<button type="button" class="acc-v2-token-copy" data-account-copy-secret="access_token" data-account-id="${esc(r.id)}" title="复制完整 Token">复制</button>${liveHtml}`;
   }

@@ -59,6 +59,12 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
         self.assertEqual(field["group"], "RoxyBrowser")
         self.assertEqual(field["type"], "list_str_multiline")
 
+    def test_roxy_liveness_fields_are_editable(self):
+        fields = {item["key"]: item for item in config_editor.EDITABLE_FIELDS}
+        self.assertEqual(fields["ACCOUNT_LIVENESS_DRIVER"]["group"], "账号认证")
+        self.assertEqual(fields["ROXY_LIVE_CHECK_HEADLESS"]["type"], "bool")
+        self.assertEqual(fields["ROXY_LIVE_CHECK_DELETE_PROFILE"]["type"], "bool")
+
     def test_apply_env_overrides_does_not_let_blank_values_mask_defaults(self):
         old_loaded = env_loader._LOADED
         env_loader._LOADED = True

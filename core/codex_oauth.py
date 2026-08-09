@@ -1317,6 +1317,7 @@ def run_codex_oauth(
 
     # Codex OAuth 支持多种驱动：
     # protocol：原纯协议；roxy/cloak/browser_use：用真实浏览器跑页面并捕获 localhost callback。
+    oauth_driver = "protocol"
     try:
         from config import codex as _codex_cfg
         from config import roxybrowser as _roxy_cfg
@@ -1356,9 +1357,13 @@ def run_codex_oauth(
                         pass
         if oauth_driver not in ("protocol", "api", "http"):
             raise RuntimeError(f"[Codex] 不支持的 CODEX_OAUTH_DRIVER={oauth_driver!r}，可选 protocol / roxy / cloak / browser_use / skyvern")
-    except ImportError:
-        # 没装 selenium / 未提供 roxy 配置时继续走协议模式，保持旧行为。
-        pass
+    except ImportError as exc:
+        if oauth_driver not in ("protocol", "api", "http"):
+            # 已明确选择浏览器认证时必须失败闭合，不能在依赖缺失后静默降级为协议。
+            return _codex_result(
+                status="failed",
+                message=f"[Codex] {oauth_driver} 驱动依赖缺失，未回退协议模式: {type(exc).__name__}: {str(exc)[:180]}",
+            )
 
     if otp_provider is None:
         from core.email_provider import wait_for_otp as otp_provider

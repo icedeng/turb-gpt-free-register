@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""账号查活后台队列：协议 BrowserSession 指纹环境 + 独立日志。"""
+"""账号查活后台队列：按配置调度 Roxy/协议认证环境 + 独立日志。"""
 from __future__ import annotations
 
 import logging
@@ -54,7 +54,15 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             f"proxy_mode={route.get('proxy_mode')} proxy_used={route.get('proxy_used') or '-'} "
             f"fallback_reason={route.get('proxy_fallback_reason') or '-'}"
         )
-        result = check_account_liveness(email, proxy=selected_proxy, clear_log=False)
+        account = db.get_account(account_id)
+        if not account:
+            raise RuntimeError("账号已删除，无法执行查活")
+        result = check_account_liveness(
+            email,
+            proxy=selected_proxy,
+            clear_log=False,
+            account=account,
+        )
         # 早期 providers/csrf 403 通常是该出口被 CF 拦截，不代表账号死亡。
         # auto/proxy 模式下如果用了代理，额外直连兜底一次，便于和套餐查询的 auto 语义保持接近。
         err_text = str(result.get("error") or "")
@@ -66,7 +74,12 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             and str(route.get("network_route") or "") == "proxy"
         ):
             _append_log(email, "[查活] 代理出口收到 403，尝试直连兜底一次")
-            result = check_account_liveness(email, proxy="", clear_log=False)
+            result = check_account_liveness(
+                email,
+                proxy="",
+                clear_log=False,
+                account=account,
+            )
         db.update_account_liveness(account_id, result)
         if result.get("ok"):
             _append_log(email, "[查活] 完成：账号正常，已刷新最新 AT/accessToken")

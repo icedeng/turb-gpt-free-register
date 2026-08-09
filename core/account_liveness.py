@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已注册账号查活：重新邮箱 OTP 登录，成功拿到最新 ChatGPT accessToken 即视为正常。"""
+"""已注册账号查活：按配置使用 Roxy 或兼容协议登录并刷新 ChatGPT accessToken。"""
 import logging
 import threading
 import time
@@ -33,6 +33,25 @@ _RETRYABLE_NETWORK_HINTS = (
 )
 
 
+def _account_liveness_driver() -> str:
+    """返回账号查活驱动；默认使用 Roxy，保留 protocol 兼容旧环境。"""
+    try:
+        from config import roxybrowser as _roxy_cfg
+        driver = str(getattr(_roxy_cfg, "ACCOUNT_LIVENESS_DRIVER", "roxy") or "roxy").strip().lower()
+        if driver in {"same_as_registration", "same-as-registration", "same"}:
+            driver = str(getattr(_roxy_cfg, "REGISTRATION_DRIVER", "roxy") or "roxy").strip().lower()
+    except Exception:
+        driver = "roxy"
+    aliases = {
+        "roxybrowser": "roxy",
+        "fingerprint": "roxy",
+        "browser": "roxy",
+        "api": "protocol",
+        "http": "protocol",
+    }
+    return aliases.get(driver, driver)
+
+
 def _is_retryable_network_error(exc: BaseException) -> bool:
     if isinstance(exc, AccountUnusableError):
         return False
@@ -50,7 +69,8 @@ def _network_preflight_with_retry(email: str, proxy: str | None, max_attempts: i
                 session.session.close()
             except Exception:
                 pass
-        session = BrowserSession(proxy=proxy if proxy else None)
+        # None 表示从配置池选择代理；空字符串明确表示直连，不能再转换成 None。
+        session = BrowserSession(proxy=proxy if proxy is not None else None)
         logger.info(
             "[查活] 会话创建完成：proxy=%s device_id=%s（网络预检第 %s/%s 次）",
             session.proxy or "配置随机/直连", session.device_id, attempt, max_attempts,
@@ -123,7 +143,13 @@ def _validate_with_retry(session: BrowserSession, email: str, otp_after_ts: floa
     raise last_exc if last_exc else RuntimeError("OTP 验证失败")
 
 
-def check_account_liveness(email: str, proxy: str | None = None, *, clear_log: bool = True) -> dict:
+def check_account_liveness(
+    email: str,
+    proxy: str | None = None,
+    *,
+    clear_log: bool = True,
+    account: dict | None = None,
+) -> dict:
     """
     重新登录账号并刷新最新 accessToken。
 
@@ -142,6 +168,7 @@ def check_account_liveness(email: str, proxy: str | None = None, *, clear_log: b
         raise ValueError("email 不能为空")
 
     checked_at = _now()
+    auth_driver = _account_liveness_driver()
     key = email.lower()
     path = log_path(email)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +192,27 @@ def check_account_liveness(email: str, proxy: str | None = None, *, clear_log: b
 
         logger.info("[查活] 日志文件：%s", path)
         logger.info("[查活] 开始重新登录：%s", email)
+        logger.info("[查活] 认证驱动：%s", auth_driver)
+
+        if auth_driver == "roxy":
+            from core.roxy_account_session import check_account_in_roxy
+
+            logger.info("[查活] 流程：Roxy Profile → Cookie 恢复 → 密码/邮箱 OTP → ChatGPT Session/AT")
+            auth_account = account if isinstance(account, dict) else {"email": email}
+            result = check_account_in_roxy(auth_account, proxy=proxy)
+            # 直接调用旧入口时仍保持 email 参数兼容；WebUI 队列传入完整账号记录，
+            # 这样 Roxy 才能恢复账号保存的 Cookie/Storage/注册密码。
+            return {
+                **result,
+                "checked_at": checked_at,
+                "proxy_used": result.get("proxy_used") or (proxy or None),
+            }
+
+        if auth_driver != "protocol":
+            raise RuntimeError(
+                f"不支持的 ACCOUNT_LIVENESS_DRIVER={auth_driver!r}，可选 roxy / protocol / same_as_registration"
+            )
+
         logger.info("[查活] 流程：Providers → CSRF → Signin → Authorize → 邮箱 OTP → OAuth callback → Session/AT")
         session, authorize_url = _network_preflight_with_retry(email, proxy)
 
@@ -172,7 +220,7 @@ def check_account_liveness(email: str, proxy: str | None = None, *, clear_log: b
         final_url = follow_authorize(session, authorize_url)
         dead_code = detect_account_unusable_text(final_url)
         if dead_code:
-            return {"ok": False, "status": "deactivated", "checked_at": checked_at, "error": dead_code}
+            return {"ok": False, "status": "deactivated", "checked_at": checked_at, "auth_driver": auth_driver, "error": dead_code}
 
         validate_result = _validate_with_retry(session, email, otp_after_ts)
         page = validate_result.get("page") if isinstance(validate_result, dict) else {}
@@ -208,18 +256,20 @@ def check_account_liveness(email: str, proxy: str | None = None, *, clear_log: b
             "session": session_info,
             "device_id": session.device_id,
             "proxy_used": session.proxy or None,
+            "auth_driver": auth_driver,
+            "auth_method": "email_otp",
         }
     except AccountUnusableError as exc:
         code = getattr(exc, "error_code", "") or detect_account_unusable_text(str(exc)) or "account_deactivated"
         logger.warning("[查活] 已废号：%s %s", email, code)
-        return {"ok": False, "status": "deactivated", "checked_at": checked_at, "error": code}
+        return {"ok": False, "status": "deactivated", "checked_at": checked_at, "auth_driver": auth_driver, "error": code}
     except Exception as exc:
         code = detect_account_unusable_text(str(exc))
         if code:
             logger.warning("[查活] 已废号：%s %s", email, code)
-            return {"ok": False, "status": "deactivated", "checked_at": checked_at, "error": code}
+            return {"ok": False, "status": "deactivated", "checked_at": checked_at, "auth_driver": auth_driver, "error": code}
         logger.warning("[查活] 失败：%s %s: %s", email, type(exc).__name__, str(exc)[:260])
-        return {"ok": False, "status": "failed", "checked_at": checked_at, "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
+        return {"ok": False, "status": "failed", "checked_at": checked_at, "auth_driver": auth_driver, "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
     finally:
         try:
             logger.info("[查活] 结束：%s", email)

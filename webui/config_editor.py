@@ -219,6 +219,18 @@ EDITABLE_FIELDS = [
         "label": "无头启动窗口", "help": "打开 Roxy 环境时向 /browser/open 传 headless；False=显示窗口，True=无头启动",
     },
     {
+        "key": "ACCOUNT_LIVENESS_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "账号认证",
+        "label": "账号查活驱动", "help": "roxy=临时 Roxy Profile 登录；protocol=兼容旧协议登录；same_as_registration=跟随注册驱动",
+    },
+    {
+        "key": "ROXY_LIVE_CHECK_HEADLESS", "file": "roxybrowser.py", "type": "bool", "group": "账号认证",
+        "label": "查活无头模式", "help": "后台 Roxy 查活是否无头运行；查活完成后会关闭临时 Profile",
+    },
+    {
+        "key": "ROXY_LIVE_CHECK_DELETE_PROFILE", "file": "roxybrowser.py", "type": "bool", "group": "账号认证",
+        "label": "查活后删除环境", "help": "查活完成后删除临时 Roxy Profile；调试时可关闭以保留现场",
+    },
+    {
         "key": "ROXY_CLOSE_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
         "label": "关闭接口路径", "help": "默认 /browser/close",
     },

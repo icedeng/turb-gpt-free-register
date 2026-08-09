@@ -1392,11 +1392,17 @@ function _liveStatusSub(r) {
   const s = r.live_check_status || '';
   const err = r.live_check_error || '';
   const at = r.live_checked_at || '';
-  if (s === 'live') return `<div class="sub-cell" title="${esc(at)}">查活: 正常</div>`;
+  const driver = r.live_check_driver === 'roxy' ? 'Roxy' : (r.live_check_driver === 'protocol' ? '协议' : (r.live_check_driver || ''));
+  const methodLabels = {cookie:'Cookie', password:'密码', email_otp:'邮箱 OTP', email_cookie_or_existing:'已有会话'};
+  const method = methodLabels[r.live_check_method] || r.live_check_method || '';
+  const mode = [driver, method].filter(Boolean).join(' / ');
+  const suffix = mode ? ` (${esc(mode)})` : '';
+  const title = [err || at, r.live_check_proxy_used ? `代理: ${r.live_check_proxy_used}` : ''].filter(Boolean).join('\n');
+  if (s === 'live') return `<div class="sub-cell" title="${esc(title)}">查活: 正常${suffix}</div>`;
   if (s === 'queued') return `<div class="sub-cell" style="color:#e6a23c">查活: 排队</div>`;
   if (s === 'running') return `<div class="sub-cell" style="color:#e6a23c">查活: 运行中</div>`;
-  if (s === 'deactivated') return `<div class="sub-cell" style="color:#f56c6c" title="${esc(err || at)}">查活: 已废</div>`;
-  if (s === 'failed') return `<div class="sub-cell" style="color:#e6a23c" title="${esc(err || at)}">查活: 失败</div>`;
+  if (s === 'deactivated') return `<div class="sub-cell" style="color:#f56c6c" title="${esc(title)}">查活: 已废${suffix}</div>`;
+  if (s === 'failed') return `<div class="sub-cell" style="color:#e6a23c" title="${esc(title)}">查活: 失败${suffix}</div>`;
   return '';
 }
 function renderAccounts() {
