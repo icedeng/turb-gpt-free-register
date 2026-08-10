@@ -93,6 +93,62 @@ class ProxyUtilsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ROXY_PROXY_POOL 为空"):
                 client.create_profile()
 
+    def test_roxy_create_uses_configured_browser_language(self):
+        client = RoxyBrowserClient()
+        captured = {}
+
+        def fake_request(method, path, *, params=None, json_body=None):
+            captured["body"] = json_body
+            return {"data": {"dirId": "new-profile"}}
+
+        with patch.object(roxybrowser_client._cfg, "ROXY_WORKSPACE_ID", "123"), \
+             patch.object(roxybrowser_client._cfg, "ROXY_BROWSER_LANGUAGE", "en-US"), \
+             patch.object(client, "request", side_effect=fake_request):
+            client.create_profile(payload={
+                "fingerInfo": {
+                    "isLanguageBaseIp": False,
+                    "language": "ja-JP",
+                    "isDisplayLanguageBaseIp": False,
+                    "displayLanguage": "ja-JP",
+                    "webRTC": "proxy",
+                },
+            })
+
+        finger_info = captured["body"]["fingerInfo"]
+        self.assertFalse(finger_info["isLanguageBaseIp"])
+        self.assertEqual(finger_info["language"], "en-US")
+        self.assertFalse(finger_info["isDisplayLanguageBaseIp"])
+        self.assertEqual(finger_info["displayLanguage"], "en-US")
+        self.assertEqual(finger_info["webRTC"], "proxy")
+
+    def test_roxy_create_without_language_follows_ip_and_clears_snapshot_language(self):
+        client = RoxyBrowserClient()
+        captured = {}
+
+        def fake_request(method, path, *, params=None, json_body=None):
+            captured["body"] = json_body
+            return {"data": {"dirId": "new-profile"}}
+
+        with patch.object(roxybrowser_client._cfg, "ROXY_WORKSPACE_ID", "123"), \
+             patch.object(roxybrowser_client._cfg, "ROXY_BROWSER_LANGUAGE", ""), \
+             patch.object(client, "request", side_effect=fake_request):
+            client.create_profile(payload={
+                "fingerInfo": {
+                    "isLanguageBaseIp": False,
+                    "language": "ja-JP",
+                    "isDisplayLanguageBaseIp": False,
+                    "displayLanguage": "ja-JP",
+                    "webRTC": "proxy",
+                },
+            })
+
+        finger_info = captured["body"]["fingerInfo"]
+        self.assertTrue(finger_info["isLanguageBaseIp"])
+        self.assertTrue(finger_info["isDisplayLanguageBaseIp"])
+        self.assertNotIn("language", finger_info)
+        self.assertNotIn("displayLanguage", finger_info)
+        self.assertEqual(finger_info["webRTC"], "proxy")
+
     def test_reopen_cleanup_keeps_profile_and_window_open(self):
         client = MagicMock()
         driver = MagicMock()

@@ -267,6 +267,10 @@ EDITABLE_FIELDS = [
         "label": "随机名称前缀", "help": "默认 rb；实际名称格式类似 rb-时间戳-随机码",
     },
     {
+        "key": "ROXY_BROWSER_LANGUAGE", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
+        "label": "浏览器语言", "help": "填写 Roxy 官方语言代码，如 en-US、ja-JP、zh-CN；留空时根据代理出口 IP 自动匹配浏览器语言和显示语言",
+    },
+    {
         "key": "ROXY_CREATE_USE_PROXY_POOL", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
         "label": "创建环境使用Roxy代理池", "help": "开启后每次创建 Roxy 环境都从下面的 RoxyBrowser 专用代理池随机取一个代理，并覆盖环境快照中的旧代理",
     },

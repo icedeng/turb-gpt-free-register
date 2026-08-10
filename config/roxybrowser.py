@@ -105,6 +105,10 @@ ROXY_DEFAULT_OS: str = "macOS"
 # 留空则使用 Roxy 对应系统的默认/最大版本；如需固定可填 15.3.2、14.7 等。
 ROXY_DEFAULT_OS_VERSION: str = ""
 
+# Roxy 浏览器语言和显示语言。填写官方语言代码（如 en-US、ja-JP、zh-CN）时强制使用；
+# 留空时由 RoxyBrowser 根据代理出口 IP 自动匹配。
+ROXY_BROWSER_LANGUAGE: str = ""
+
 # 创建 Roxy 环境时是否使用 RoxyBrowser 专用 ROXY_PROXY_POOL：
 #   False = 不主动给 Roxy 环境设置代理
 #   True  = 每次创建环境时从 ROXY_PROXY_POOL 随机取一个代理写入 proxyInfo
@@ -130,4 +134,4 @@ ROXY_PROFILE_CREATE_PAYLOAD: dict = {
 ROXY_CODEX_CALLBACK_TIMEOUT: int = 180
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ACCOUNT_LIVENESS_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_DELETE_PROFILE': 'bool', 'ROXY_WEBDRIVER_URL': 'str', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})
+apply_env_overrides(globals(), {'REGISTRATION_DRIVER': 'str', 'ACCOUNT_LIVENESS_DRIVER': 'str', 'ROXY_API_BASE': 'str', 'ROXY_API_TOKEN': 'str', 'ROXY_PROFILE_ID': 'str', 'ROXY_WORKSPACE_ID': 'str', 'ROXY_PROJECT_ID': 'str', 'ROXY_WORKSPACE_LIST_PATH': 'str', 'ROXY_OPEN_PATH': 'str', 'ROXY_DETAIL_PATH': 'str', 'ROXY_DETAIL_METHOD': 'str', 'ROXY_OPEN_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_HEADLESS': 'bool', 'ROXY_LIVE_CHECK_DELETE_PROFILE': 'bool', 'ROXY_WEBDRIVER_URL': 'str', 'ROXY_CLOSE_PATH': 'str', 'ROXY_KEEP_BROWSER_OPEN': 'bool', 'ROXY_ONE_PROFILE_PER_ACCOUNT': 'bool', 'ROXY_DELETE_PROFILE_AFTER_RUN': 'bool', 'ROXY_RANDOM_OS_ON_CREATE': 'bool', 'ROXY_RANDOM_OS_CHOICES': 'str', 'ROXY_RANDOM_PROFILE_NAME_ON_CREATE': 'bool', 'ROXY_BROWSER_LANGUAGE': 'str', 'ROXY_CREATE_USE_PROXY_POOL': 'bool', 'ROXY_PROXY_POOL': 'list_str_multiline', 'ROXY_PROXY_CHECK_CHANNEL': 'str', 'ROXY_DELETE_PATH': 'str', 'ROXY_CODEX_CALLBACK_TIMEOUT': 'int'})

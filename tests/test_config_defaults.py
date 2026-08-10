@@ -59,6 +59,11 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
         self.assertEqual(field["group"], "RoxyBrowser")
         self.assertEqual(field["type"], "list_str_multiline")
 
+    def test_roxy_browser_language_is_editable_in_roxybrowser_group(self):
+        field = next(item for item in config_editor.EDITABLE_FIELDS if item["key"] == "ROXY_BROWSER_LANGUAGE")
+        self.assertEqual(field["group"], "RoxyBrowser")
+        self.assertEqual(field["type"], "str")
+
     def test_roxy_liveness_fields_are_editable(self):
         fields = {item["key"]: item for item in config_editor.EDITABLE_FIELDS}
         self.assertEqual(fields["ACCOUNT_LIVENESS_DRIVER"]["group"], "账号认证")

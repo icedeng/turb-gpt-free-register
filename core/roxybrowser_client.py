@@ -449,6 +449,25 @@ class RoxyBrowserClient:
             body.setdefault("projectId", project_id)
         if payload:
             body.update(payload)
+        language = str(getattr(_cfg, "ROXY_BROWSER_LANGUAGE", "") or "").strip()
+        finger_info = dict(body.get("fingerInfo") or {})
+        if language:
+            # Roxy 官方字段：关闭 Follow IP 后，语言值才会作为自定义值生效。
+            finger_info.update({
+                "isLanguageBaseIp": False,
+                "language": language,
+                "isDisplayLanguageBaseIp": False,
+                "displayLanguage": language,
+            })
+        else:
+            # 配置为空时强制恢复 Follow IP，避免重建旧环境时沿用快照中的自定义语言。
+            finger_info.update({
+                "isLanguageBaseIp": True,
+                "isDisplayLanguageBaseIp": True,
+            })
+            finger_info.pop("language", None)
+            finger_info.pop("displayLanguage", None)
+        body["fingerInfo"] = finger_info
         if bool(getattr(_cfg, "ROXY_CREATE_USE_PROXY_POOL", False)):
             proxy_pool = list(getattr(_cfg, "ROXY_PROXY_POOL", []) or [])
             if not proxy_pool:
@@ -471,7 +490,7 @@ class RoxyBrowserClient:
                 "或直接在 ROXY_PROFILE_CREATE_PAYLOAD 里加入 {'workspaceId': '你的工作区ID'}。"
             )
         logger.info(
-            "[Roxy] 创建环境参数：workspaceId=%s projectId=%s name=%s random_name=%s os=%s osVersion=%s random_os=%s",
+            "[Roxy] 创建环境参数：workspaceId=%s projectId=%s name=%s random_name=%s os=%s osVersion=%s random_os=%s language=%s",
             body.get("workspaceId"),
             body.get("projectId") or "-",
             body.get("name") or "-",
@@ -479,6 +498,7 @@ class RoxyBrowserClient:
             body.get("os") or "-",
             body.get("osVersion") or "-",
             random_os_enabled,
+            language or "按IP自动匹配",
         )
         result = self.request(_cfg.ROXY_CREATE_METHOD, _cfg.ROXY_CREATE_PATH, json_body=body)
         profile_id = _first(result, [
