@@ -3413,6 +3413,7 @@ function _accountsV2MoreMenu(r) {
   const roxyCloseDisabled = !roxyProfileId || r.roxy_reopen_status === 'closed';
   const parts = [
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
+    `<button type="button" data-account-copy-secret="session_json" data-account-id="${esc(r.id)}" title="复制完整 ChatGPT /api/auth/session JSON">复制 Session JSON</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
     `<button type="button" data-account-roxy-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 RoxyBrowser</button>`,
     `<button type="button" class="danger" data-account-roxy-close="${esc(r.id)}"${roxyCloseDisabled ? ' disabled' : ''} title="${roxyCloseDisabled ? '当前没有账号页打开的 Roxy Profile 记录' : '关闭当前 Roxy 窗口并删除 Profile，释放窗口额度'}">关闭并释放 Roxy</button>`,
@@ -3641,7 +3642,7 @@ async function onAccountsBodyClick(e) {
       const value = await fetchOneAccountSecret(id, field);
       if (!value) { showToast('可复制内容为空'); return; }
       copyText(value);
-      showToast(field === 'access_token' ? 'Token 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
+      showToast(field === 'access_token' ? 'Token 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : field === 'session_json' ? '完整 Session JSON 已复制' : '账号整行已复制');
     } catch(err) {
       showToast('复制失败: ' + err.message);
     } finally {

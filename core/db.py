@@ -1429,6 +1429,17 @@ def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
             if token:
                 row["access_token"] = token
             session = result.get("session") or {}
+            # 查活成功时保存 /api/auth/session 的完整响应；保留已有扩展字段。
+            raw_extra = row.get("extra_json")
+            try:
+                extra = json.loads(raw_extra) if isinstance(raw_extra, str) and raw_extra else (raw_extra if isinstance(raw_extra, dict) else {})
+            except Exception:
+                extra = {}
+            if not isinstance(extra, dict):
+                extra = {}
+            if isinstance(session, dict) and session:
+                extra["chatgpt_session"] = session
+                row["extra_json"] = json.dumps(extra, ensure_ascii=False)
             user = session.get("user") or {}
             account = session.get("account") or {}
             if user.get("id"):
@@ -1446,13 +1457,6 @@ def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
             auth_state = result.get("auth_state")
             if isinstance(auth_state, dict) and result.get("auth_driver") == "roxy":
                 auth_state = dict(auth_state)
-                raw_extra = row.get("extra_json")
-                try:
-                    extra = json.loads(raw_extra) if isinstance(raw_extra, str) and raw_extra else (raw_extra if isinstance(raw_extra, dict) else {})
-                except Exception:
-                    extra = {}
-                if not isinstance(extra, dict):
-                    extra = {}
                 previous_state = extra.get("roxy_auth_state")
                 if isinstance(previous_state, dict):
                     # 临时 Selenium 连接偶发无法读取 Cookie 时，不要用空快照覆盖

@@ -152,7 +152,17 @@ def _account_secret_value(row: dict, field: str) -> str:
         return str(row.get("copy_line") or "")
     if field == "codex_agent_token":
         return str(row.get("codex_agent_token") or "")
-    raise ValueError("field 仅支持 access_token/copy_line/codex_agent_token")
+    if field == "session_json":
+        raw_extra = row.get("extra_json")
+        try:
+            extra = json.loads(raw_extra) if isinstance(raw_extra, str) and raw_extra else (raw_extra if isinstance(raw_extra, dict) else {})
+        except Exception:
+            extra = {}
+        session = extra.get("chatgpt_session") if isinstance(extra, dict) else None
+        if not isinstance(session, dict):
+            return ""
+        return json.dumps(session, ensure_ascii=False, indent=2)
+    raise ValueError("field 仅支持 access_token/copy_line/codex_agent_token/session_json")
 
 
 def _compact_job_for_list(row: dict) -> dict:

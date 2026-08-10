@@ -152,6 +152,33 @@ class RoxyAccountSessionTests(unittest.TestCase):
         self.assertEqual(extra["roxy_live_check"]["profile_id"], "temporary-profile")
         self.assertEqual(saved[0]["id"], 7)
 
+    def test_liveness_persists_complete_chatgpt_session(self):
+        session = {
+            "accessToken": "fresh-token",
+            "user": {"id": "user-1", "email": "user@example.com"},
+            "account": {"planType": "plus"},
+            "expires": "2026-01-01T00:00:00Z",
+            "extra_field": {"preserved": True},
+        }
+        row = {
+            "id": 9,
+            "email": "user@example.com",
+            "extra_json": json.dumps({"registration_password": "keep-me"}),
+        }
+        result = {
+            "ok": True,
+            "status": "live",
+            "access_token": "fresh-token",
+            "session": session,
+        }
+        with patch.object(db, "_load_accounts", return_value=[row]), \
+             patch.object(db, "_save_accounts"):
+            self.assertTrue(db.update_account_liveness(9, result))
+
+        extra = json.loads(row["extra_json"])
+        self.assertEqual(extra["chatgpt_session"], session)
+        self.assertEqual(extra["registration_password"], "keep-me")
+
     def test_empty_capture_does_not_discard_previous_roxy_cookies(self):
         row = {
             "id": 8,
