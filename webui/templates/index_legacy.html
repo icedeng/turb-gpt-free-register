@@ -561,7 +561,7 @@
         <div class="buttons">
           <span class="muted" id="codexSelectedHint" style="font-size:12px;align-self:center;margin-right:4px;">已选 0</span>
           <button class="btn primary" id="btnCodexDownloadBulk" disabled title="把选中的多个本地凭证打包成一个 JSON 文件下载（备份/迁移用，CPA 不能直接读，需先解包）">批量下载本地</button>
-          <button class="btn good" id="btnCodexDownloadBulkCpa" disabled title="从 CPA auth-files 下载选中账号的真实 Codex JSON，并打包成 ZIP（可直接解压放入 CPA auth-dir）">批量从CPA下载</button>
+          <button class="btn good" id="btnCodexDownloadBulkCpa" disabled title="从 CPA auth-files 下载选中账号的真实 Codex JSON，并打包成 ZIP；文件可直接导入 Codex2API">批量从CPA下载</button>
           <button class="btn" id="btnCodexDeleteBulk" disabled title="删除选中的本地 Codex JSON 凭证文件">删除选中</button>
         </div>
       </div>
@@ -2606,7 +2606,7 @@ function renderCodex() {
       <td class="muted">${esc(r.expired || '-')}</td>
       <td class="actions">
         <button class="primary" data-codex-download="${esc(r.filename)}" title="下载本地 codex_accounts/ 中的 JSON/回执">本地下载</button>
-        <button class="good" data-codex-download-cpa="${esc(r.filename)}" title="按邮箱从 CPA auth-files 下载真实 Codex JSON">从CPA下载</button>
+        <button class="good" data-codex-download-cpa="${esc(r.filename)}" title="按邮箱从 CPA auth-files 下载可直接导入 Codex2API 的真实 Codex JSON">从CPA下载</button>
         ${exported ? `<button data-codex-reset="${esc(r.filename)}" title="重新标记为未导出">重置标记</button>` : ''}
         <button class="danger" data-codex-delete="${esc(r.filename)}" title="删除本地 Codex JSON 凭证文件">删除</button>
       </td>

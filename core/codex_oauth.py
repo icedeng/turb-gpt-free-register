@@ -517,6 +517,28 @@ def download_cpa_codex_auth_text(*, cpa_name: str | None = None, email: str = ""
         raise RuntimeError(f"[Codex][CPA] CPA 下载内容不是有效 JSON: {name}") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError(f"[Codex][CPA] CPA 下载内容不是 JSON 对象: {name}")
+
+    # Codex2API 的 JSON 导入器兼容 snake_case / camelCase；这里统一补齐 snake_case，
+    # 并拒绝 callback 回执等没有可用 Token 的空壳文件。
+    aliases = {
+        "refresh_token": "refreshToken",
+        "access_token": "accessToken",
+        "id_token": "idToken",
+        "account_id": "accountId",
+    }
+    for target, source in aliases.items():
+        if not str(parsed.get(target) or "").strip() and str(parsed.get(source) or "").strip():
+            parsed[target] = parsed[source]
+    if not str(parsed.get("email") or "").strip():
+        parsed["email"] = str((meta or {}).get("email") or email or "").strip()
+    parsed.setdefault("type", "codex")
+    if not (
+        str(parsed.get("refresh_token") or "").strip()
+        or str(parsed.get("access_token") or "").strip()
+    ):
+        raise RuntimeError(
+            f"[Codex][CPA] CPA 凭证不含 refresh_token/access_token，无法导入 Codex2API: {name}"
+        )
     return json.dumps(parsed, ensure_ascii=False, indent=2) + "\n", name, (meta or {"name": name})
 
 def _first_non_empty(*values) -> str:
@@ -637,6 +659,64 @@ def _submit_cpa_callback(callback_url: str) -> dict:
             )
             time.sleep(delay)
     raise RuntimeError(f"[Codex][CPA] callback 提交失败：{last_exc}")
+
+
+def _wait_cpa_auth_completion(state: str, *, email: str = "") -> dict:
+    """等待 CPA 后台完成 code 换 Token、保存凭证，并确认 auth-files 已可见。"""
+    state_text = str(state or "").strip()
+    if not state_text:
+        raise RuntimeError("[Codex][CPA] 等待凭证入库时缺少 OAuth state")
+
+    timeout = max(5, int(getattr(_cfg, "CPA_AUTH_COMPLETION_TIMEOUT", 120) or 120))
+    interval = max(0.2, float(getattr(_cfg, "CPA_AUTH_COMPLETION_POLL_INTERVAL", 1.0) or 1.0))
+    deadline = time.monotonic() + timeout
+    last_payload: dict = {}
+    logger.info("[Codex][CPA] callback 已接收，等待 Token 交换和凭证入库，timeout=%ss", timeout)
+
+    while True:
+        last_payload = _cpa_request_json(
+            "GET",
+            f"/v0/management/get-auth-status?state={quote(state_text, safe='')}",
+        )
+        status = str(last_payload.get("status") or "").strip().lower()
+        if status == "ok":
+            break
+        if status == "error":
+            error = str(last_payload.get("error") or last_payload.get("message") or "未知错误").strip()
+            raise RuntimeError(f"[Codex][CPA] Token 交换或凭证入库失败: {error}")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"[Codex][CPA] 等待 Token 交换和凭证入库超时（{timeout}s），最后状态={status or '-'}"
+            )
+        time.sleep(interval)
+
+    # CompleteOAuthSession 在保存文件后触发；正常应立即可见，额外短轮询用于兼容文件监听延迟。
+    file_deadline = time.monotonic() + min(10.0, max(2.0, timeout / 4))
+    while True:
+        meta = find_cpa_codex_auth_file(email=email)
+        if meta:
+            name = str(meta.get("name") or "").strip()
+            logger.info("[Codex][CPA] 凭证已入库：%s", name or "-")
+            result = dict(last_payload)
+            result["cpa_file_meta"] = meta
+            result["cpa_file_name"] = name
+            return result
+        if time.monotonic() >= file_deadline:
+            raise RuntimeError(
+                f"[Codex][CPA] CPA 已报告授权成功，但 auth-files 中未找到账号凭证: {email or '未知账号'}"
+            )
+        time.sleep(interval)
+
+
+def _submit_cpa_callback_and_wait(callback_url: str, *, state: str, email: str = "") -> dict:
+    """提交 callback，并仅在 CPA 真实凭证可下载后返回成功。"""
+    submitted = _submit_cpa_callback(callback_url)
+    completed = _wait_cpa_auth_completion(state, email=email)
+    result = dict(submitted)
+    result["cpa_auth_status"] = completed
+    result["cpa_file_name"] = str(completed.get("cpa_file_name") or "")
+    result["message"] = f"CPA credential ready: {result['cpa_file_name'] or '-'}"
+    return result
 
 
 # ============================================================
@@ -1447,7 +1527,11 @@ def run_codex_oauth(
         # 7A. CPA 模式：把 callback URL 交给 CPA，由 CPA 持有 verifier 并完成换 token / 写 auth。
         #     本地不再用 code 换 token；仅保存 CPA 返回的授权文件或回调回执。
         if auth_source == "cpa":
-            submit_payload = _submit_cpa_callback(callback_url)
+            submit_payload = _submit_cpa_callback_and_wait(
+                callback_url,
+                state=state,
+                email=email,
+            )
             path = _save_cpa_local_record(
                 email=email,
                 callback_url=callback_url,

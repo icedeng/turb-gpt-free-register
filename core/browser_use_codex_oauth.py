@@ -1355,7 +1355,11 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
             logger.info("[Codex][BrowserUse] 已捕获 callback code：%s...", code[:24])
 
             if auth_source == "cpa":
-                submit_payload = proto._submit_cpa_callback(callback_url)
+                submit_payload = proto._submit_cpa_callback_and_wait(
+                    callback_url,
+                    state=state,
+                    email=email,
+                )
                 file_path = proto._save_cpa_local_record(
                     email=email,
                     callback_url=callback_url,

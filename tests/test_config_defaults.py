@@ -71,6 +71,12 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
         self.assertEqual(fields["ROXY_LIVE_CHECK_HEADLESS"]["type"], "bool")
         self.assertEqual(fields["ROXY_LIVE_CHECK_DELETE_PROFILE"]["type"], "bool")
 
+    def test_cpa_completion_fields_are_editable(self):
+        fields = {item["key"]: item for item in config_editor.EDITABLE_FIELDS}
+        self.assertEqual(fields["CPA_AUTH_COMPLETION_TIMEOUT"]["type"], "int")
+        self.assertEqual(fields["CPA_AUTH_COMPLETION_POLL_INTERVAL"]["type"], "float")
+        self.assertEqual(fields["CPA_AUTH_COMPLETION_TIMEOUT"]["group"], "Codex")
+
     def test_roxy_webdriver_url_is_written_to_env_by_config_editor(self):
         with patch("config.env_loader.write_env_values", return_value=["ROXY_WEBDRIVER_URL"]) as write:
             result = config_editor.update_config({"ROXY_WEBDRIVER_URL": "http://192.168.0.90:9515"})

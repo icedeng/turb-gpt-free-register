@@ -1301,7 +1301,11 @@ def _run_roxy_codex_oauth_once(
         logger.info("[Codex][Browser] 已捕获 callback code：%s...", code[:24])
 
         if auth_source == "cpa":
-            submit_payload = proto._submit_cpa_callback(callback_url)
+            submit_payload = proto._submit_cpa_callback_and_wait(
+                callback_url,
+                state=state,
+                email=email,
+            )
             path = proto._save_cpa_local_record(
                 email=email,
                 callback_url=callback_url,

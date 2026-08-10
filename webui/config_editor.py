@@ -580,6 +580,14 @@ EDITABLE_FIELDS = [
         "label": "CPA 超时(秒)", "help": "请求 CPA 管理接口的超时时间",
     },
     {
+        "key": "CPA_AUTH_COMPLETION_TIMEOUT", "file": "codex.py", "type": "int", "group": "Codex",
+        "label": "CPA凭证入库超时(秒)", "help": "callback 提交后等待 CPA 完成 Token 交换并写入 auth-files；超时或交换失败时补跑不会误报成功",
+    },
+    {
+        "key": "CPA_AUTH_COMPLETION_POLL_INTERVAL", "file": "codex.py", "type": "float", "group": "Codex",
+        "label": "CPA入库轮询间隔(秒)", "help": "轮询 CPA get-auth-status 的间隔，默认 1 秒",
+    },
+    {
         "key": "CPA_SAVE_CALLBACK_RECEIPT", "file": "codex.py", "type": "bool", "group": "Codex",
         "label": "保存CPA回执", "help": "CPA 未返回完整授权文件时，本地仍保存一份回调提交记录",
     },
