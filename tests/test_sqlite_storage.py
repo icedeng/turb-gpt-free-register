@@ -88,6 +88,30 @@ class SqliteStorageTests(unittest.TestCase):
         self.assertEqual(db.get_account_by_email("c@example.com")["access_token"], "token-c")
         self.assertEqual(db.count_accounts(), 2)
 
+    def test_new_job_updates_persist_without_cache_reload(self):
+        db.sqlite_storage_status()
+        job = db.create_job("generic_api")
+        db.update_job(
+            job["id"],
+            status="running",
+            email="new@example.com",
+            started_at="2026-08-14T01:00:00",
+        )
+        db.update_job(
+            job["id"],
+            status="success",
+            account_id=99,
+            completed_at="2026-08-14T01:02:00",
+        )
+
+        db._SQLITE_ROW_CACHE.clear()
+        saved = db.get_job(job["id"])
+        self.assertEqual(saved["status"], "success")
+        self.assertEqual(saved["email"], "new@example.com")
+        self.assertEqual(saved["account_id"], 99)
+        self.assertEqual(saved["started_at"], "2026-08-14T01:00:00")
+        self.assertEqual(saved["completed_at"], "2026-08-14T01:02:00")
+
     def test_pool_summaries_use_sqlite(self):
         self.assertEqual(db.outlook_pool_summary()["available"], 1)
         self.assertEqual(db.generic_api_email_pool_summary()["used"], 1)

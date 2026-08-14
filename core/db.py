@@ -329,12 +329,21 @@ def _sqlite_save_rows(table: str, rows: list[dict]) -> None:
         next_id = max(existing_ids, default=0) + 1
         for row in rows:
             if int(row.get("id") or 0) <= 0:
-                row._tracking = False
-                row["id"] = next_id
-                row._tracking = True
+                if isinstance(row, _TrackedRow):
+                    row._tracking = False
+                    row["id"] = next_id
+                    row._tracking = True
+                else:
+                    row["id"] = next_id
                 rows.dirty_ids.add(next_id)
                 next_id += 1
-        dirty = [row for row in rows if int(row.get("id") or 0) in rows.dirty_ids]
+        # append/insert 为兼容旧调用会暂时保留传入 dict 的引用。首次保存时，
+        # 这些普通 dict 必须视为 dirty，并在落库后转换成可追踪行；否则同一进程中
+        # 后续 update_job 等修改不会进入 dirty_ids，只更新内存、不更新 SQLite。
+        dirty = [
+            row for row in rows
+            if int(row.get("id") or 0) in rows.dirty_ids or not isinstance(row, _TrackedRow)
+        ]
         conn = _sqlite_connect()
         try:
             with conn:
@@ -357,6 +366,9 @@ def _sqlite_save_rows(table: str, rows: list[dict]) -> None:
                     )
             rows.dirty_ids.clear()
             rows.deleted_ids.clear()
+            for index, row in enumerate(rows):
+                if not isinstance(row, _TrackedRow) or row._owner is not rows:
+                    list.__setitem__(rows, index, _TrackedRow(dict(row), rows))
             _SQLITE_ROW_CACHE[cache_key] = rows
             return
         finally:
