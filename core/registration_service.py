@@ -194,10 +194,18 @@ def _registration_email_max_failures() -> int:
     return max(1, min(100, value))
 
 
+def _is_roxy_quota_error(error: object) -> bool:
+    return "窗口单日创建次数已经超出" in str(error or "")
+
+
 def _handle_failed_registration_email(email: str | None, reason: str) -> None:
     """普通失败可回收；累计达到阈值或高风险失败时停用邮箱。"""
     email = str(email or "").strip()
     if not email:
+        return
+    if _is_roxy_quota_error(reason):
+        _release_unconsumed_job_email(email, "Roxy 每日创建额度超限，基础设施失败不计入邮箱失败次数")
+        logger.warning("[Service] Roxy 每日创建额度超限，已回收邮箱且不累计失败: email=%s", email)
         return
     if _should_disable_failed_registration_email(reason):
         _disable_job_email(email, reason)

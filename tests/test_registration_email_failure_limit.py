@@ -50,6 +50,7 @@ class RegistrationEmailFailureLimitTests(unittest.TestCase):
             {"email": "user@example.com", "status": "failed", "job_type": "registration", "account_id": None},
             {"email": "USER@example.com", "status": "failed", "job_type": "registration", "account_id": ""},
             {"email": "user@example.com", "status": "stopped", "job_type": "registration", "account_id": None},
+            {"email": "user@example.com", "status": "failed", "job_type": "registration", "account_id": None, "error_message": "Roxy API 返回失败：窗口单日创建次数已经超出"},
             {"email": "user@example.com", "status": "failed", "job_type": "codex_retry", "account_id": 1},
             {"email": "user@example.com", "status": "failed", "job_type": "registration", "account_id": 1},
         ]
@@ -64,6 +65,18 @@ class RegistrationEmailFailureLimitTests(unittest.TestCase):
             registration_service._handle_failed_registration_email("user@example.com", "普通失败")
 
         release.assert_called_once()
+        disable.assert_not_called()
+
+    def test_roxy_quota_failure_is_released_without_counting(self):
+        with patch.object(registration_service, "_release_unconsumed_job_email", return_value=True) as release, \
+             patch.object(db, "count_registration_failures") as count, \
+             patch.object(registration_service, "_disable_job_email") as disable:
+            registration_service._handle_failed_registration_email(
+                "user@example.com", "RuntimeError: Roxy API 返回失败 POST /browser/create: 窗口单日创建次数已经超出",
+            )
+
+        release.assert_called_once()
+        count.assert_not_called()
         disable.assert_not_called()
 
     def test_failure_at_limit_disables_email(self):

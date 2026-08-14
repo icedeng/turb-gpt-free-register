@@ -2877,6 +2877,7 @@ def count_registration_failures(email: str) -> int:
             and str(row.get("job_type") or "registration") == "registration"
             and str(row.get("status") or "") == "failed"
             and row.get("account_id") in (None, "")
+            and "窗口单日创建次数已经超出" not in str(row.get("error_message") or "")
         )
 
 
