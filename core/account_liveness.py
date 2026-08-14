@@ -75,6 +75,7 @@ def _network_preflight_with_retry(email: str, proxy: str | None, max_attempts: i
             "[查活] 会话创建完成：proxy=%s device_id=%s（网络预检第 %s/%s 次）",
             session.proxy or "配置随机/直连", session.device_id, attempt, max_attempts,
         )
+        logger.info("[查活] 指纹摘要：%s", session.fingerprint_summary_text())
         try:
             get_providers(session)
             csrf = get_csrf_token(session)
@@ -248,6 +249,7 @@ def check_account_liveness(
         user = session_info.get("user") or {}
         account = session_info.get("account") or {}
         logger.info("[查活] 正常：%s user_id=%s plan=%s", email, user.get("id"), account.get("planType"))
+        fp = session.fingerprint_summary()
         return {
             "ok": True,
             "status": "live",
@@ -258,6 +260,8 @@ def check_account_liveness(
             "proxy_used": session.proxy or None,
             "auth_driver": auth_driver,
             "auth_method": "email_otp",
+            "fingerprint": fp,
+            "fingerprint_text": session.fingerprint_summary_text(),
         }
     except AccountUnusableError as exc:
         code = getattr(exc, "error_code", "") or detect_account_unusable_text(str(exc)) or "account_deactivated"
