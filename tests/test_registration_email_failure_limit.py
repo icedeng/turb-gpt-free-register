@@ -5,6 +5,46 @@ from core import db, registration_service
 
 
 class RegistrationEmailFailureLimitTests(unittest.TestCase):
+    def test_startup_recovery_reconciles_active_registration_jobs(self):
+        jobs = [
+            {"id": 10, "status": "running", "job_type": "registration", "email": "done@example.com"},
+            {"id": 11, "status": "pending", "job_type": "registration", "email": "unused@example.com"},
+            {"id": 12, "status": "stopping", "job_type": "codex_retry", "email": "codex@example.com"},
+            {"id": 13, "status": "success", "job_type": "registration", "email": "old@example.com"},
+        ]
+
+        def account_for_job(job):
+            return {"id": 99, "email": "done@example.com"} if job["id"] == 10 else None
+
+        with patch.object(db, "list_jobs", return_value=jobs), \
+             patch.object(registration_service, "_account_for_job", side_effect=account_for_job), \
+             patch.object(db, "update_job") as update, \
+             patch.object(registration_service, "_release_unconsumed_job_email", return_value=True) as release:
+            result = registration_service.recover_interrupted_jobs()
+
+        self.assertEqual(result, {"total": 3, "success": 1, "stopped": 2, "released": 1})
+        update.assert_any_call(
+            10,
+            status="success",
+            email="done@example.com",
+            account_id=99,
+            completed_at=unittest.mock.ANY,
+            clear_error=True,
+        )
+        update.assert_any_call(
+            11,
+            status="stopped",
+            error="WebUI 重启导致任务中断，请重试",
+            completed_at=unittest.mock.ANY,
+        )
+        update.assert_any_call(
+            12,
+            status="stopped",
+            error="WebUI 重启导致任务中断，请重试",
+            completed_at=unittest.mock.ANY,
+        )
+        release.assert_called_once_with("unused@example.com", "WebUI 重启导致注册任务中断")
+
     def test_count_only_full_registration_failures_without_account(self):
         rows = [
             {"email": "user@example.com", "status": "failed", "job_type": "registration", "account_id": None},

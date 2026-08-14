@@ -2832,6 +2832,7 @@ def update_job(
     started_at: str | None = None,
     completed_at: str | None = None,
     account_id: int | None = None,
+    clear_error: bool = False,
 ) -> None:
     with _LOCK:
         rows = _load_jobs()
@@ -2842,7 +2843,9 @@ def update_job(
             row["status"] = status
         if email is not None:
             row["email"] = email
-        if error is not None:
+        if clear_error:
+            row["error_message"] = None
+        elif error is not None:
             row["error_message"] = error
         if started_at is not None:
             row["started_at"] = started_at

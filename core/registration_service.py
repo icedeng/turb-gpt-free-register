@@ -129,16 +129,17 @@ def _prepare_registration_args() -> tuple[str, str, str]:
     return email, name, birthday
 
 
-def _release_unconsumed_job_email(email: str | None, reason: str) -> None:
+def _release_unconsumed_job_email(email: str | None, reason: str) -> bool:
     """任务失败兜底：只回收尚未生成账号、仍处于 used 的邮箱领取。"""
     if not email:
-        return
+        return False
     try:
         from core.email_provider import release_email_if_unconsumed
 
-        release_email_if_unconsumed(email, note=f"任务未消耗，已自动回收: {reason[:180]}")
+        return bool(release_email_if_unconsumed(email, note=f"任务未消耗，已自动回收: {reason[:180]}"))
     except Exception:
         logger.exception("[Service] 回收未消耗邮箱失败: %s", email)
+        return False
 
 
 def _is_final_session_access_token_timeout(error: object) -> bool:
@@ -486,6 +487,53 @@ def submit_registration(count: int = 1, email_source: str | None = None, workers
             jobs.append(db.get_job(int(job["id"])) or job)
     logger.info(f"[Service] 已提交 {count} 个注册任务，源={email_source}，workers={effective_workers}")
     return jobs
+
+
+def recover_interrupted_jobs() -> dict:
+    """服务启动时收敛旧进程遗留的注册任务，避免永久显示排队/运行中。"""
+    jobs = db.list_jobs(limit=1_000_000)
+    active = [job for job in jobs if str(job.get("status") or "") in {"pending", "running", "stopping"}]
+    recovered_success = 0
+    recovered_stopped = 0
+    released = 0
+    now_iso = datetime.now().isoformat(timespec="seconds")
+
+    for job in active:
+        job_id = int(job.get("id") or 0)
+        job_type = str(job.get("job_type") or "registration")
+        account = _account_for_job(job)
+        if job_type == "registration" and account is not None:
+            db.update_job(
+                job_id,
+                status="success",
+                email=str(account.get("email") or job.get("email") or "").strip() or None,
+                account_id=int(account.get("id")) if account.get("id") is not None else None,
+                completed_at=now_iso,
+                clear_error=True,
+            )
+            recovered_success += 1
+            logger.warning("[Service] 启动恢复任务 #%s：账号已存在，状态校正为 success", job_id)
+            continue
+
+        db.update_job(
+            job_id,
+            status="stopped",
+            error="WebUI 重启导致任务中断，请重试",
+            completed_at=now_iso,
+        )
+        recovered_stopped += 1
+        if job_type == "registration":
+            email = str(job.get("email") or "").strip()
+            if email and _release_unconsumed_job_email(email, "WebUI 重启导致注册任务中断"):
+                released += 1
+        logger.warning("[Service] 启动恢复任务 #%s：旧任务实例不存在，状态校正为 stopped", job_id)
+
+    return {
+        "total": len(active),
+        "success": recovered_success,
+        "stopped": recovered_stopped,
+        "released": released,
+    }
 
 
 def _account_for_job(job: dict) -> dict | None:

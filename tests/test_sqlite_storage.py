@@ -112,6 +112,28 @@ class SqliteStorageTests(unittest.TestCase):
         self.assertEqual(saved["started_at"], "2026-08-14T01:00:00")
         self.assertEqual(saved["completed_at"], "2026-08-14T01:02:00")
 
+    def test_new_account_and_pool_rows_remain_tracked(self):
+        db.sqlite_storage_status()
+
+        account_id = db.insert_account(email="new-account@example.com", access_token="token")
+        self.assertTrue(db.update_account_note(account_id, "persisted note"))
+
+        inserted, skipped = db.import_generic_api_emails([
+            {"email": "new-pool@example.com", "code_url": "https://mail.test/new"},
+        ])
+        self.assertEqual((inserted, skipped), (1, 0))
+        db.release_generic_api_email("new-pool@example.com", status="disabled", note="persisted status")
+
+        db.claim_next_domain_email("new-domain@example.com")
+        db.release_domain_email("new-domain@example.com", status="failed", note="persisted domain status")
+
+        db._SQLITE_ROW_CACHE.clear()
+        self.assertEqual(db.get_account(account_id)["note"], "persisted note")
+        self.assertEqual(db.get_generic_api_email_by_email("new-pool@example.com")["status"], "disabled")
+        self.assertEqual(db.get_generic_api_email_by_email("new-pool@example.com")["note"], "persisted status")
+        self.assertEqual(db.get_domain_email_by_email("new-domain@example.com")["status"], "failed")
+        self.assertEqual(db.get_domain_email_by_email("new-domain@example.com")["note"], "persisted domain status")
+
     def test_pool_summaries_use_sqlite(self):
         self.assertEqual(db.outlook_pool_summary()["available"], 1)
         self.assertEqual(db.generic_api_email_pool_summary()["used"], 1)
