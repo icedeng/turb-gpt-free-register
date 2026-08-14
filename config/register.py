@@ -17,6 +17,10 @@ REGISTER_PASSWORD = ""
 # OpenAI 限制：name_invalid_chars —— 只允许字母和空格
 REGISTER_NAME = ""
 
+# 同一邮箱完整注册连续失败达到该次数后自动停用，避免反复领取失败邮箱。
+# 仅统计尚未生成本地账号的 registration 失败；手动停止/取消、Codex 补跑不计入。
+REGISTRATION_EMAIL_MAX_FAILURES = 3
+
 # 注册成功落库后是否自动查询套餐/Plus 资格。
 # 关闭后不会在注册完成后立刻访问 backend-api/accounts/check，后续可在账号列表手动查询。
 AUTO_PLAN_CHECK_AFTER_REGISTER = False
@@ -29,6 +33,7 @@ POST_REGISTER_DWELL_SECONDS_RANGE = "18,45"
 apply_env_overrides(globals(), {
     'REGISTER_EMAIL': 'str',
     'REGISTER_NAME': 'str',
+    'REGISTRATION_EMAIL_MAX_FAILURES': 'int',
     'AUTO_PLAN_CHECK_AFTER_REGISTER': 'bool',
     'POST_REGISTER_DWELL_SECONDS_RANGE': 'str',
 })

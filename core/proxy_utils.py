@@ -26,13 +26,13 @@ def _looks_like_host(value: str) -> bool:
     return True
 
 
-def normalize_proxy_url(proxy_url: str, *, default_scheme: str = "socks5") -> str:
+def normalize_proxy_url(proxy_url: str, *, default_scheme: str = "http") -> str:
     """把代理池简写统一转换成标准代理 URL。
 
     支持标准 URL、``username:password@hostname:port``、
     ``username:password:hostname:port``、``hostname:port:username:password``
     和 ``hostname:port@username:password``。
-    无协议格式默认补充 SOCKS5；空值保持为空。
+    无协议格式默认补充 HTTP；空值保持为空。
     """
     text = str(proxy_url or "").strip()
     if not text:

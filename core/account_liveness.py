@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已注册账号查活：按配置使用 Roxy 或兼容协议登录并刷新 ChatGPT accessToken。"""
+"""已注册账号查活：按配置使用 CloakBrowser 或兼容协议刷新 ChatGPT accessToken。"""
 import logging
 import threading
 import time
@@ -34,18 +34,19 @@ _RETRYABLE_NETWORK_HINTS = (
 
 
 def _account_liveness_driver() -> str:
-    """返回账号查活驱动；默认使用 Roxy，保留 protocol 兼容旧环境。"""
+    """返回账号查活驱动；默认使用 CloakBrowser，保留 protocol 兼容旧环境。"""
     try:
         from config import roxybrowser as _roxy_cfg
-        driver = str(getattr(_roxy_cfg, "ACCOUNT_LIVENESS_DRIVER", "roxy") or "roxy").strip().lower()
+        driver = str(getattr(_roxy_cfg, "ACCOUNT_LIVENESS_DRIVER", "cloak") or "cloak").strip().lower()
         if driver in {"same_as_registration", "same-as-registration", "same"}:
-            driver = str(getattr(_roxy_cfg, "REGISTRATION_DRIVER", "roxy") or "roxy").strip().lower()
+            driver = str(getattr(_roxy_cfg, "REGISTRATION_DRIVER", "cloak") or "cloak").strip().lower()
     except Exception:
-        driver = "roxy"
+        driver = "cloak"
     aliases = {
         "roxybrowser": "roxy",
         "fingerprint": "roxy",
         "browser": "roxy",
+        "cloakbrowser": "cloak",
         "api": "protocol",
         "http": "protocol",
     }
@@ -195,6 +196,18 @@ def check_account_liveness(
         logger.info("[查活] 开始重新登录：%s", email)
         logger.info("[查活] 认证驱动：%s", auth_driver)
 
+        if auth_driver == "cloak":
+            from core.cloak_account_session import check_account_in_cloak
+
+            logger.info("[查活] 流程：CloakBrowser → Cookie 恢复 → 密码/邮箱 OTP → ChatGPT Session/AT")
+            auth_account = account if isinstance(account, dict) else {"email": email}
+            result = check_account_in_cloak(auth_account, proxy=proxy)
+            return {
+                **result,
+                "checked_at": checked_at,
+                "proxy_used": result.get("proxy_used") or (proxy or None),
+            }
+
         if auth_driver == "roxy":
             from core.roxy_account_session import check_account_in_roxy
 
@@ -211,7 +224,7 @@ def check_account_liveness(
 
         if auth_driver != "protocol":
             raise RuntimeError(
-                f"不支持的 ACCOUNT_LIVENESS_DRIVER={auth_driver!r}，可选 roxy / protocol / same_as_registration"
+                f"不支持的 ACCOUNT_LIVENESS_DRIVER={auth_driver!r}，可选 cloak / roxy / protocol / same_as_registration"
             )
 
         logger.info("[查活] 流程：Providers → CSRF → Signin → Authorize → 邮箱 OTP → OAuth callback → Session/AT")

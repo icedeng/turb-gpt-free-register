@@ -95,11 +95,11 @@ def _compact_account_for_list(row: dict) -> dict:
         reopen = state.get("reopen") if isinstance(state, dict) else {}
         if isinstance(reopen, dict):
             if reopen.get("profile_id"):
-                out["roxy_reopen_profile_id"] = str(reopen["profile_id"])
+                out["cloak_reopen_profile_id"] = str(reopen["profile_id"])
             if reopen.get("status"):
-                out["roxy_reopen_status"] = str(reopen["status"])
+                out["cloak_reopen_status"] = str(reopen["status"])
             if reopen.get("opened_at"):
-                out["roxy_reopen_opened_at"] = str(reopen["opened_at"])
+                out["cloak_reopen_opened_at"] = str(reopen["opened_at"])
     except Exception:
         pass
     # 这些是列表固定列直接展示字段。
@@ -487,27 +487,26 @@ def create_app(auth_code: str | None = None) -> Flask:
         return jsonify({"ok": True, "updated": True, "id": acc_id, "note": note})
 
     @app.post("/api/accounts/<int:acc_id>/roxy-reopen")
-    def api_account_roxy_reopen(acc_id: int):
-        """创建/复用 RoxyBrowser 环境，恢复该账号保存的 ChatGPT 登录态。"""
+    @app.post("/api/accounts/<int:acc_id>/cloak-reopen")
+    def api_account_cloak_reopen(acc_id: int):
+        """打开 CloakBrowser 并恢复该账号保存的 ChatGPT 登录态。"""
         acc = db.get_account(acc_id)
         if not acc:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         try:
-            from core.roxy_reopen import reopen_account_in_roxy
-            result = reopen_account_in_roxy(acc)
+            from core.cloak_reopen import reopen_account_in_cloak
+            result = reopen_account_in_cloak(acc)
             auth_state = result.pop("_auth_state", None)
             access_token = result.pop("_access_token", None)
-            profile_detail = result.pop("_profile_detail", None)
             db.update_account_roxy_reopen(
                 acc_id,
                 profile_id=result.get("profile_id"),
                 auth_state=auth_state,
                 access_token=access_token,
-                profile_detail=profile_detail,
             )
             return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
         except Exception as exc:
-            logger.exception("重新打开 RoxyBrowser 失败: account_id=%s", acc_id)
+            logger.exception("重新打开 CloakBrowser 失败: account_id=%s", acc_id)
             try:
                 db.update_account_roxy_reopen(acc_id, error=f"{type(exc).__name__}: {exc}")
             except Exception:
@@ -516,18 +515,19 @@ def create_app(auth_code: str | None = None) -> Flask:
             return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), status
 
     @app.post("/api/accounts/<int:acc_id>/roxy-close")
-    def api_account_roxy_close(acc_id: int):
-        """关闭账号页打开的 Roxy 窗口并删除 Profile，释放窗口额度。"""
+    @app.post("/api/accounts/<int:acc_id>/cloak-close")
+    def api_account_cloak_close(acc_id: int):
+        """关闭账号页打开的 CloakBrowser 窗口。"""
         acc = db.get_account(acc_id)
         if not acc:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         try:
-            from core.roxy_reopen import close_and_release_account_roxy
-            result = close_and_release_account_roxy(acc)
+            from core.cloak_reopen import close_account_cloak
+            result = close_account_cloak(acc)
             db.update_account_roxy_released(acc_id, profile_id=result.get("profile_id"))
             return jsonify({"ok": True, "account_id": acc_id, "email": acc.get("email"), **result})
         except Exception as exc:
-            logger.exception("关闭并释放 RoxyBrowser 失败: account_id=%s", acc_id)
+            logger.exception("关闭 CloakBrowser 失败: account_id=%s", acc_id)
             try:
                 db.update_account_roxy_released(acc_id, error=f"{type(exc).__name__}: {exc}")
             except Exception:
@@ -535,18 +535,19 @@ def create_app(auth_code: str | None = None) -> Flask:
             return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
 
     @app.get("/api/accounts/<int:acc_id>/roxy-reopen-log")
-    def api_account_roxy_reopen_log(acc_id: int):
-        """读取该账号最近一次 RoxyBrowser 重新打开日志。"""
+    @app.get("/api/accounts/<int:acc_id>/cloak-reopen-log")
+    def api_account_cloak_reopen_log(acc_id: int):
+        """读取该账号最近一次 CloakBrowser 重新打开日志。"""
         acc = db.get_account(acc_id)
         if not acc:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         email = str(acc.get("email") or "").strip()
         if not email:
             return jsonify({"ok": False, "error": "账号邮箱为空"}), 400
-        from core import roxy_reopen
-        path = roxy_reopen.log_path(email)
+        from core import cloak_reopen
+        path = cloak_reopen.log_path(email)
         if not path.exists():
-            return jsonify({"ok": True, "log": "", "running": roxy_reopen.is_reopening(email)})
+            return jsonify({"ok": True, "log": "", "running": cloak_reopen.is_reopening(email)})
         max_bytes = 80_000
         size = path.stat().st_size
         with path.open("rb") as f:
@@ -556,7 +557,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         return jsonify({
             "ok": True,
             "log": content,
-            "running": roxy_reopen.is_reopening(email),
+            "running": cloak_reopen.is_reopening(email),
         })
 
     @app.post("/api/accounts/note-bulk")
@@ -2203,17 +2204,23 @@ def create_app(auth_code: str | None = None) -> Flask:
         from config import email as _email_cfg
         manual_otp_required = not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True))
         rows = db.list_jobs(limit=fetch_limit)
-        for row in rows:
-            row["manual_otp_required"] = manual_otp_required
-            row.update(svc.get_retry_info(row))
         if paged or page_arg is not None or page_size_arg is not None:
             page = max(1, int(page_arg or 1))
             page_size = max(1, min(500, int(page_size_arg or limit or 50)))
             result = _paginate_items(rows, page=page, page_size=page_size)
-            result["items"] = [_compact_job_for_list(r) for r in (result.get("items") or [])]
+            page_rows = result.get("items") or []
+            retry_infos = svc.get_retry_infos(page_rows, all_jobs=rows)
+            for row, retry_info in zip(page_rows, retry_infos):
+                row["manual_otp_required"] = manual_otp_required
+                row.update(retry_info)
+            result["items"] = [_compact_job_for_list(r) for r in page_rows]
             result["status_counts"] = _job_status_counts(rows)
             result["compact"] = True
             return jsonify(result)
+        retry_infos = svc.get_retry_infos(rows, all_jobs=rows)
+        for row, retry_info in zip(rows, retry_infos):
+            row["manual_otp_required"] = manual_otp_required
+            row.update(retry_info)
         return jsonify(rows)
 
     @app.post("/api/jobs")

@@ -9,8 +9,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 try:
     from curl_cffi import requests as curl_requests
@@ -47,13 +48,13 @@ def _int_setting(name: str, default: int, lower: int, upper: int) -> int:
     return max(lower, min(upper, value))
 
 
-SUPPORTED_LINK_TYPES = {"pix", "upi", "kakao_pay", "ideal"}
+SUPPORTED_LINK_TYPES = {"pix", "upi", "kakao_pay", "ideal", "paypal_zero"}
 
 
 def _link_type(value: str | None = None) -> str:
     t = str(value or _runtime_setting("EXTRACT_LINK_TYPE", "pix") or "pix").strip().lower()
     if t not in SUPPORTED_LINK_TYPES:
-        raise ValueError("提链类型无效，仅支持 pix / upi / kakao_pay / ideal")
+        raise ValueError("提链类型无效，仅支持 pix / upi / kakao_pay / ideal / paypal_zero")
     return t
 
 
@@ -69,6 +70,148 @@ def _cdk(value: str | None = None) -> str:
     if not cdk:
         raise ValueError("EXTRACT_LINK_CDK/CDK 为空")
     return cdk
+
+
+def _paypal_zero_api_base() -> str:
+    base = str(_runtime_setting("PAYPAL_ZERO_API_BASE", "http://127.0.0.1:5572") or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("PAYPAL_ZERO_API_BASE 为空")
+    return base
+
+
+def _paypal_zero_proxy_pool() -> list[str]:
+    raw = _runtime_setting("PAYPAL_ZERO_PROXY_POOL", [])
+    if isinstance(raw, str):
+        rows = raw.splitlines()
+    else:
+        rows = list(raw or [])
+    proxies = [str(item or "").strip() for item in rows if str(item or "").strip() and not str(item).strip().startswith("#")]
+    if not proxies:
+        raise ValueError("PAYPAL_ZERO_PROXY_POOL 为空；PayPal 0 元提链需要巴西出口代理")
+    return proxies
+
+
+def _request_json(method: str, url: str, *, payload: dict | None = None, timeout: int = 30) -> dict:
+    """直连提链服务并返回 JSON，不继承宿主机的 HTTP 代理。"""
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = Request(
+        url,
+        data=body,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        method=method,
+    )
+    try:
+        with build_opener(ProxyHandler({})).open(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except HTTPError as exc:
+        try:
+            data = json.loads(exc.read().decode("utf-8", "replace") or "{}")
+        except Exception:
+            data = {}
+        raise RuntimeError(_extract_error_message(data) or f"HTTP {exc.code}") from exc
+    try:
+        data = json.loads(raw or "{}")
+    except Exception as exc:
+        raise RuntimeError(f"提链服务响应不是有效 JSON: {raw[:300]}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"提链服务响应不是 JSON 对象: {type(data).__name__}")
+    return data
+
+
+def _create_paypal_zero_job(*, token: str) -> dict:
+    payload = {
+        "access_token": token,
+        "country": str(_runtime_setting("PAYPAL_ZERO_PROXY_COUNTRY", "BR") or "BR").strip().upper(),
+        "proxies": "\n".join(_paypal_zero_proxy_pool()),
+        "proxy_scheme": str(_runtime_setting("PAYPAL_ZERO_PROXY_SCHEME", "http") or "http").strip().lower(),
+        "checkout_attempts": _int_setting("PAYPAL_ZERO_CHECKOUT_ATTEMPTS", 5, 1, 50),
+        "provider_attempts": _int_setting("PAYPAL_ZERO_PROVIDER_ATTEMPTS", 10, 1, 100),
+    }
+    data = _request_json(
+        "POST",
+        f"{_paypal_zero_api_base()}/api/jobs",
+        payload=payload,
+        timeout=_int_setting("EXTRACT_LINK_REQUEST_TIMEOUT", 30, 5, 300),
+    )
+    if not data.get("job_id"):
+        raise RuntimeError(f"link-pp 未返回 job_id: {data}")
+    return data
+
+
+def _paypal_zero_result(payload: dict) -> dict:
+    """把 link-pp 结果映射为现有提链存储/前端字段。"""
+    result = dict(payload or {})
+    approve_url = str(result.get("paypal_approve_url") or result.get("provider_redirect_url") or result.get("checkout_url") or "")
+    result.update({
+        "long_url": approve_url,
+        "copy_paste": approve_url,
+        "payment_method": "paypal",
+        "payment_link_type": "paypal_zero",
+    })
+    return result
+
+
+def _cancel_paypal_zero_job(job_id: str) -> None:
+    """父任务异常结束时停止 link-pp 子任务，避免继续占用代理。"""
+    try:
+        _request_json(
+            "POST",
+            f"{_paypal_zero_api_base()}/api/jobs/{quote(job_id, safe='')}/cancel",
+            payload={},
+            timeout=_int_setting("EXTRACT_LINK_REQUEST_TIMEOUT", 30, 5, 300),
+        )
+    except Exception:
+        logger.warning("[提链] 取消 link-pp 任务失败: job=%s", job_id, exc_info=True)
+
+
+def _run_paypal_zero_extract(*, account_id: int, email: str, access_token: str, trigger: str) -> dict:
+    if not db.mark_account_extract_running(account_id):
+        return {"ok": False, "error": "账号已删除或提链状态已被重置"}
+    created = _create_paypal_zero_job(token=access_token)
+    job_id = str(created.get("job_id") or "")
+    db.update_account_extract(account_id, {
+        "ok": False,
+        "status": "running",
+        "job_id": job_id,
+        "link_type": "paypal_zero",
+        "message": "PayPal 0 元提链任务已创建，等待结果",
+    })
+    timeout = _int_setting("EXTRACT_LINK_EVENT_TIMEOUT", 180, 30, 1800)
+    deadline = time.monotonic() + timeout
+    last_status = ""
+    try:
+        while time.monotonic() < deadline:
+            snapshot = _request_json(
+                "GET",
+                f"{_paypal_zero_api_base()}/api/jobs/{quote(job_id, safe='')}",
+                timeout=_int_setting("EXTRACT_LINK_REQUEST_TIMEOUT", 30, 5, 300),
+            )
+            status = str(snapshot.get("status") or "")
+            if status != last_status:
+                last_status = status
+                db.update_account_extract(account_id, {
+                    "ok": False,
+                    "status": "running",
+                    "job_id": job_id,
+                    "link_type": "paypal_zero",
+                    "message": f"PayPal 0 元提链：{status or 'running'}",
+                })
+            if status == "success":
+                result = _paypal_zero_result(snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {})
+                if not result.get("long_url"):
+                    raise RuntimeError("link-pp 成功但未返回 PayPal 链接")
+                final = {"ok": True, "status": "success", "job_id": job_id, "link_type": "paypal_zero", "result": result}
+                db.update_account_extract(account_id, final)
+                logger.info("[提链] PayPal 0 元提链成功: %s job=%s", email, job_id)
+                return final
+            if status in {"failed", "cancelled"}:
+                raise RuntimeError(str(snapshot.get("failure_reason") or snapshot.get("error") or f"link-pp 任务 {status}"))
+            time.sleep(2)
+        raise TimeoutError(f"等待 link-pp 任务结果超时（{timeout}s）")
+    except Exception:
+        if last_status not in {"failed", "cancelled"}:
+            _cancel_paypal_zero_job(job_id)
+        raise
 
 
 _WORKERS = _int_setting("EXTRACT_LINK_WORKERS", 3, 1, 16)
@@ -270,6 +413,13 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
     logs: list[str] = []
     last_event = None
     try:
+        if link_type == "paypal_zero":
+            return _run_paypal_zero_extract(
+                account_id=account_id,
+                email=email,
+                access_token=access_token,
+                trigger=trigger,
+            )
         if not db.mark_account_extract_running(account_id):
             return {"ok": False, "error": "账号已删除或提链状态已被重置"}
         job = _create_extract_job(token=access_token, link_type=link_type, cdk=cdk)
@@ -333,7 +483,7 @@ def enqueue_account_extract(*, account_id: int, email: str, access_token: str, t
         return {"accepted": False, "busy": False, "error": "提链队列已满"}
     try:
         lt = _link_type(link_type)
-        code = _cdk(cdk)
+        code = "" if lt == "paypal_zero" else _cdk(cdk)
         if not db.claim_account_extract(account_id, trigger=trigger, link_type=lt):
             _QUEUE_SLOTS.release()
             return {"accepted": False, "busy": True, "error": "该账号正在提链中"}

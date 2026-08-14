@@ -1,14 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-本地文件持久化层。
-
-根目录文件分工：
-    - 用于注册的邮箱.txt      仅保留可继续注册的邮箱素材
-    - 注册成功的邮箱.txt      仅保存注册成功的邮箱素材，不追加 token
-    - 注册成功的token.txt     每行只保存一个 access token
-    - 用于注册的邮箱.json     Outlook 账号池完整状态
-    - 注册成功的邮箱.json     注册成功账号完整状态
-"""
+"""SQLite 主存储与 JSON/TXT 兼容导出层。"""
 import hashlib
 import json
 import sqlite3
@@ -34,7 +25,9 @@ _ACCOUNTS_JSON = _PROJECT_ROOT / "注册成功的邮箱.json"
 _ACCOUNTS_TXT = _PROJECT_ROOT / "注册成功的邮箱.txt"
 _TOKENS_TXT = _PROJECT_ROOT / "注册成功的token.txt"
 _JOBS_JSON = _PROJECT_ROOT / "注册任务.json"
+_DOMAIN_EMAIL_JSON = _PROJECT_ROOT / "用于注册的域名邮箱.json"
 _VIEWER_HTML = _PROJECT_ROOT / "accounts_viewer.html"
+_SQLITE_PATH = _PROJECT_ROOT / "turb_gpt.sqlite3"
 _CODEX_DIR = _PROJECT_ROOT / "codex_accounts"
 # 导出状态单独存：{ "codex-邮箱-plan.json": {"exported_at": "...", "exported_count": N} }
 # 不污染 CPA 兼容的原文件
@@ -45,6 +38,122 @@ _LEGACY_OUTLOOK_JSON = _LEGACY_DATA_DIR / "outlook_accounts.json"
 _LEGACY_ACCOUNTS_JSON = _LEGACY_DATA_DIR / "registered_accounts.json"
 _LEGACY_JOBS_JSON = _LEGACY_DATA_DIR / "registration_jobs.json"
 _LOCK = threading.RLock()
+_SQLITE_INIT_LOCK = threading.Lock()
+_SQLITE_READY_PATH: str | None = None
+_FORCE_SQLITE_FOR_TESTS = False
+_SQLITE_ROW_CACHE: dict[tuple[str, str], "_TrackedRows"] = {}
+_DEFAULT_JSON_PATHS = (
+    _OUTLOOK_JSON,
+    _GENERIC_API_EMAIL_JSON,
+    _ACCOUNTS_JSON,
+    _JOBS_JSON,
+    _DOMAIN_EMAIL_JSON,
+)
+
+_SQLITE_TABLES = {
+    "accounts": (_ACCOUNTS_JSON, _LEGACY_ACCOUNTS_JSON),
+    "registration_jobs": (_JOBS_JSON, _LEGACY_JOBS_JSON),
+    "outlook_pool": (_OUTLOOK_JSON, _LEGACY_OUTLOOK_JSON),
+    "generic_email_pool": (_GENERIC_API_EMAIL_JSON,),
+    "domain_email_pool": (_DOMAIN_EMAIL_JSON,),
+}
+
+
+class _TrackedRow(dict):
+    """记录发生字段赋值的 SQLite 行。"""
+
+    def __init__(self, value: dict, owner: "_TrackedRows"):
+        super().__init__(value)
+        self._owner = owner
+        self._tracking = True
+
+    def _mark(self) -> None:
+        if self._tracking:
+            self._owner.mark_dirty(self)
+
+    def __setitem__(self, key, value) -> None:
+        previous = self.get(key, object())
+        super().__setitem__(key, value)
+        if previous != value:
+            self._mark()
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        self._mark()
+
+    def update(self, *args, **kwargs) -> None:
+        before = dict(self)
+        super().update(*args, **kwargs)
+        if before != self:
+            self._mark()
+
+    def pop(self, key, *args):
+        exists = key in self
+        value = super().pop(key, *args)
+        if exists:
+            self._mark()
+        return value
+
+    def setdefault(self, key, default=None):
+        exists = key in self
+        value = super().setdefault(key, default)
+        if not exists:
+            self._mark()
+        return value
+
+
+class _TrackedRows(list):
+    """缓存一张表的行，并跟踪增删改 ID。"""
+
+    def __init__(self, table: str, rows: list[dict]):
+        self.table = table
+        self.dirty_ids: set[int] = set()
+        self.deleted_ids: set[int] = set()
+        super().__init__()
+        for row in rows:
+            super().append(_TrackedRow(row, self))
+
+    def mark_dirty(self, row: dict) -> None:
+        try:
+            row_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            row_id = 0
+        if row_id > 0:
+            self.dirty_ids.add(row_id)
+
+    def append(self, value) -> None:
+        # 新增业务通常在 append 后继续补字段；保留原 dict 引用，新增行本身已标记 dirty。
+        row = value if isinstance(value, dict) else dict(value)
+        super().append(row)
+        self.mark_dirty(row)
+
+    def extend(self, values) -> None:
+        for value in values:
+            self.append(value)
+
+    def insert(self, index, value) -> None:
+        row = value if isinstance(value, dict) else dict(value)
+        super().insert(index, row)
+        self.mark_dirty(row)
+
+    def remove(self, value) -> None:
+        try:
+            row_id = int(value.get("id") or 0)
+        except (AttributeError, TypeError, ValueError):
+            row_id = 0
+        super().remove(value)
+        if row_id > 0:
+            self.deleted_ids.add(row_id)
+
+    def pop(self, index=-1):
+        value = super().pop(index)
+        try:
+            row_id = int(value.get("id") or 0)
+        except (AttributeError, TypeError, ValueError):
+            row_id = 0
+        if row_id > 0:
+            self.deleted_ids.add(row_id)
+        return value
 
 
 def _now() -> str:
@@ -74,6 +183,305 @@ def _write_json(path: Path, data: Any) -> None:
         encoding="utf-8",
     )
     tmp.replace(path)
+
+
+def _sqlite_backend_enabled() -> bool:
+    """测试若替换了历史 JSON 路径则沿用文件后端，保持已有测试和工具兼容。"""
+    if _FORCE_SQLITE_FOR_TESTS or _SQLITE_PATH != _PROJECT_ROOT / "turb_gpt.sqlite3":
+        return True
+    current = (
+        _OUTLOOK_JSON,
+        _GENERIC_API_EMAIL_JSON,
+        _ACCOUNTS_JSON,
+        _JOBS_JSON,
+        _DOMAIN_EMAIL_JSON,
+    )
+    return current == _DEFAULT_JSON_PATHS
+
+
+def _sqlite_connect() -> sqlite3.Connection:
+    _ensure_storage()
+    conn = sqlite3.connect(str(_SQLITE_PATH), timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
+def _sqlite_schema(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    for table in _SQLITE_TABLES:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                id INTEGER PRIMARY KEY,
+                email TEXT,
+                status TEXT,
+                archived INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                data_json TEXT NOT NULL
+            )
+        """)
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_email ON {table}(email)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_status ON {table}(status)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_archived ON {table}(archived)")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_updated_at ON {table}(updated_at)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS storage_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("PRAGMA user_version=1")
+
+
+def _sqlite_row_values(row: dict) -> tuple:
+    return (
+        int(row.get("id") or 0),
+        str(row.get("email") or "").strip().lower() or None,
+        str(row.get("status") or "") or None,
+        1 if row.get("archived") else 0,
+        str(row.get("updated_at") or row.get("created_at") or "") or None,
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _sqlite_import_table(conn: sqlite3.Connection, table: str, source_paths: tuple[Path, ...]) -> int:
+    key = f"json_imported:{table}"
+    if conn.execute("SELECT 1 FROM storage_meta WHERE key=?", (key,)).fetchone():
+        return 0
+    rows: list[dict] = []
+    for path in source_paths:
+        data = _read_json(path, None)
+        if isinstance(data, list):
+            rows = [dict(item) for item in data if isinstance(item, dict)]
+            break
+    next_id = 1
+    for row in rows:
+        try:
+            row_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            row_id = 0
+        if row_id <= 0:
+            row_id = next_id
+            row["id"] = row_id
+        next_id = max(next_id, row_id + 1)
+    if rows:
+        conn.executemany(
+            f"INSERT OR REPLACE INTO {table}(id,email,status,archived,updated_at,data_json) VALUES(?,?,?,?,?,?)",
+            [_sqlite_row_values(row) for row in rows],
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO storage_meta(key,value,updated_at) VALUES(?,?,?)",
+        (key, json.dumps({"rows": len(rows)}, ensure_ascii=False), _now()),
+    )
+    return len(rows)
+
+
+def _ensure_sqlite() -> None:
+    global _SQLITE_READY_PATH
+    if not _sqlite_backend_enabled():
+        return
+    current_path = str(_SQLITE_PATH.resolve())
+    if _SQLITE_READY_PATH == current_path and _SQLITE_PATH.exists():
+        return
+    with _SQLITE_INIT_LOCK:
+        if _SQLITE_READY_PATH == current_path and _SQLITE_PATH.exists():
+            return
+        conn = _sqlite_connect()
+        try:
+            _sqlite_schema(conn)
+            with conn:
+                for table, sources in _SQLITE_TABLES.items():
+                    _sqlite_import_table(conn, table, sources)
+                conn.execute(
+                    "INSERT OR REPLACE INTO storage_meta(key,value,updated_at) VALUES(?,?,?)",
+                    ("storage_backend", "sqlite", _now()),
+                )
+        finally:
+            conn.close()
+        _SQLITE_ROW_CACHE.clear()
+        _SQLITE_READY_PATH = current_path
+
+
+def _sqlite_load_rows(table: str) -> list[dict]:
+    _ensure_sqlite()
+    cache_key = (str(_SQLITE_PATH.resolve()), table)
+    cached = _SQLITE_ROW_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    conn = _sqlite_connect()
+    try:
+        rows = conn.execute(f"SELECT data_json FROM {table} ORDER BY id").fetchall()
+        tracked = _TrackedRows(table, [json.loads(row["data_json"]) for row in rows])
+        _SQLITE_ROW_CACHE[cache_key] = tracked
+        return tracked
+    finally:
+        conn.close()
+
+
+def _sqlite_save_rows(table: str, rows: list[dict]) -> None:
+    _ensure_sqlite()
+    cache_key = (str(_SQLITE_PATH.resolve()), table)
+    if isinstance(rows, _TrackedRows) and rows.table == table:
+        existing_ids = {int(row.get("id") or 0) for row in rows if int(row.get("id") or 0) > 0}
+        next_id = max(existing_ids, default=0) + 1
+        for row in rows:
+            if int(row.get("id") or 0) <= 0:
+                row._tracking = False
+                row["id"] = next_id
+                row._tracking = True
+                rows.dirty_ids.add(next_id)
+                next_id += 1
+        dirty = [row for row in rows if int(row.get("id") or 0) in rows.dirty_ids]
+        conn = _sqlite_connect()
+        try:
+            with conn:
+                if rows.deleted_ids:
+                    placeholders = ",".join("?" for _ in rows.deleted_ids)
+                    conn.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", tuple(rows.deleted_ids))
+                if dirty:
+                    conn.executemany(
+                        f"""
+                            INSERT INTO {table}(id,email,status,archived,updated_at,data_json)
+                            VALUES(?,?,?,?,?,?)
+                            ON CONFLICT(id) DO UPDATE SET
+                                email=excluded.email,
+                                status=excluded.status,
+                                archived=excluded.archived,
+                                updated_at=excluded.updated_at,
+                                data_json=excluded.data_json
+                        """,
+                        [_sqlite_row_values(row) for row in dirty],
+                    )
+            rows.dirty_ids.clear()
+            rows.deleted_ids.clear()
+            _SQLITE_ROW_CACHE[cache_key] = rows
+            return
+        finally:
+            conn.close()
+
+    normalized: list[dict] = []
+    next_id = 1
+    for item in rows:
+        row = dict(item)
+        try:
+            row_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            row_id = 0
+        if row_id <= 0:
+            row_id = next_id
+            row["id"] = row_id
+            item["id"] = row_id
+        next_id = max(next_id, row_id + 1)
+        normalized.append(row)
+    ids = [int(row["id"]) for row in normalized]
+    conn = _sqlite_connect()
+    try:
+        with conn:
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                conn.execute(f"DELETE FROM {table} WHERE id NOT IN ({placeholders})", ids)
+            else:
+                conn.execute(f"DELETE FROM {table}")
+            conn.executemany(
+                f"""
+                    INSERT INTO {table}(id,email,status,archived,updated_at,data_json)
+                    VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        email=excluded.email,
+                        status=excluded.status,
+                        archived=excluded.archived,
+                        updated_at=excluded.updated_at,
+                        data_json=excluded.data_json
+                    WHERE {table}.data_json <> excluded.data_json
+                """,
+                [_sqlite_row_values(row) for row in normalized],
+            )
+    finally:
+        conn.close()
+    _SQLITE_ROW_CACHE.pop(cache_key, None)
+
+
+def _sqlite_query_rows(
+    table: str,
+    *,
+    where: str = "",
+    params: tuple = (),
+    order: str = "id ASC",
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    _ensure_sqlite()
+    sql = f"SELECT data_json FROM {table}"
+    if where:
+        sql += f" WHERE {where}"
+    sql += f" ORDER BY {order}"
+    values: list[Any] = list(params)
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        values.extend([max(0, int(limit)), max(0, int(offset))])
+    conn = _sqlite_connect()
+    try:
+        return [json.loads(row["data_json"]) for row in conn.execute(sql, values).fetchall()]
+    finally:
+        conn.close()
+
+
+def _sqlite_count(table: str, *, where: str = "", params: tuple = ()) -> int:
+    _ensure_sqlite()
+    sql = f"SELECT COUNT(*) FROM {table}"
+    if where:
+        sql += f" WHERE {where}"
+    conn = _sqlite_connect()
+    try:
+        return int(conn.execute(sql, params).fetchone()[0])
+    finally:
+        conn.close()
+
+
+def _sqlite_summary(table: str) -> dict:
+    _ensure_sqlite()
+    conn = _sqlite_connect()
+    try:
+        counts = {
+            str(row["status"] or "available"): int(row["n"])
+            for row in conn.execute(
+                f"SELECT COALESCE(NULLIF(status,''),'available') AS status, COUNT(*) AS n FROM {table} GROUP BY COALESCE(NULLIF(status,''),'available')"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    out = {"available": 0, "used": 0, "failed": 0, **counts}
+    out["total"] = sum(v for k, v in out.items() if k != "total")
+    return out
+
+
+def sqlite_storage_status() -> dict:
+    """返回 SQLite 主存储状态，用于部署验收和故障排查。"""
+    _ensure_sqlite()
+    conn = _sqlite_connect()
+    try:
+        counts = {
+            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in _SQLITE_TABLES
+        }
+        integrity = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+        journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        conn.close()
+    return {
+        "backend": "sqlite",
+        "path": str(_SQLITE_PATH),
+        "exists": _SQLITE_PATH.exists(),
+        "size_bytes": _SQLITE_PATH.stat().st_size if _SQLITE_PATH.exists() else 0,
+        "journal_mode": journal_mode,
+        "user_version": user_version,
+        "quick_check": integrity,
+        "counts": counts,
+    }
 
 
 def _next_id(items: list[dict]) -> int:
@@ -459,6 +867,8 @@ render();
 
 
 def _load_outlook() -> list[dict]:
+    if _sqlite_backend_enabled():
+        return _sqlite_load_rows("outlook_pool")
     rows = _read_json(_OUTLOOK_JSON, None)
     if not isinstance(rows, list):
         rows = _read_json(_LEGACY_OUTLOOK_JSON, [])
@@ -466,12 +876,17 @@ def _load_outlook() -> list[dict]:
 
 
 def _save_outlook(rows: list[dict]) -> None:
+    if _sqlite_backend_enabled():
+        _sqlite_save_rows("outlook_pool", rows)
+        return
     _write_json(_OUTLOOK_JSON, rows)
     _sync_outlook_txt(rows)
     _render_static_viewer(outlook_rows=rows)
 
 
 def _load_generic_api_emails() -> list[dict]:
+    if _sqlite_backend_enabled():
+        return _sqlite_load_rows("generic_email_pool")
     rows = _read_json(_GENERIC_API_EMAIL_JSON, [])
     return rows if isinstance(rows, list) else []
 
@@ -479,11 +894,16 @@ def _load_generic_api_emails() -> list[dict]:
 def _save_generic_api_emails(rows: list[dict]) -> None:
     for row in rows:
         row["copy_line"] = _generic_api_email_line(row)
+    if _sqlite_backend_enabled():
+        _sqlite_save_rows("generic_email_pool", rows)
+        return
     _write_json(_GENERIC_API_EMAIL_JSON, rows)
     _sync_generic_api_email_txt(rows)
 
 
 def _load_accounts() -> list[dict]:
+    if _sqlite_backend_enabled():
+        return _sqlite_load_rows("accounts")
     rows = _read_json(_ACCOUNTS_JSON, None)
     if not isinstance(rows, list):
         rows = _read_json(_LEGACY_ACCOUNTS_JSON, [])
@@ -493,6 +913,9 @@ def _load_accounts() -> list[dict]:
 def _save_accounts(rows: list[dict]) -> None:
     for row in rows:
         row["copy_line"] = _account_line(row)
+    if _sqlite_backend_enabled():
+        _sqlite_save_rows("accounts", rows)
+        return
     _write_json(_ACCOUNTS_JSON, rows)
     _sync_accounts_txt(rows)
     _sync_tokens_txt(rows)
@@ -500,6 +923,8 @@ def _save_accounts(rows: list[dict]) -> None:
 
 
 def _load_jobs() -> list[dict]:
+    if _sqlite_backend_enabled():
+        return _sqlite_load_rows("registration_jobs")
     rows = _read_json(_JOBS_JSON, None)
     if not isinstance(rows, list):
         rows = _read_json(_LEGACY_JOBS_JSON, [])
@@ -507,6 +932,9 @@ def _load_jobs() -> list[dict]:
 
 
 def _save_jobs(rows: list[dict]) -> None:
+    if _sqlite_backend_enabled():
+        _sqlite_save_rows("registration_jobs", rows)
+        return
     _write_json(_JOBS_JSON, rows)
 
 
@@ -1080,6 +1508,11 @@ def update_account_extract(acc_id: int, result: dict | None = None) -> bool:
             row["extract_link_image_url_svg"] = payload.get("image_url_svg")
             row["extract_link_payment_method"] = payload.get("payment_method")
             row["extract_link_payment_link_type"] = payload.get("payment_link_type")
+            row["extract_link_paypal_approve_url"] = payload.get("paypal_approve_url")
+            row["extract_link_provider_redirect_url"] = payload.get("provider_redirect_url")
+            row["extract_link_checkout_url"] = payload.get("checkout_url")
+            row["extract_link_ba_token"] = payload.get("ba_token")
+            row["extract_link_checkout_session_id"] = payload.get("session_id")
             row["extract_link_expires_at"] = payload.get("expires_at")
             if payload.get("cdk_remaining") is not None:
                 row["extract_link_cdk_remaining"] = payload.get("cdk_remaining")
@@ -1193,6 +1626,8 @@ def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archive
         "extract_link_message", "extract_link_error",
         "extract_link_long_url", "extract_link_copy_paste",
         "extract_link_image_url_png", "extract_link_image_url_svg",
+        "extract_link_paypal_approve_url", "extract_link_provider_redirect_url",
+        "extract_link_checkout_url", "extract_link_ba_token", "extract_link_checkout_session_id",
         "extract_link_expires_at",
         "codex_status", "codex_error",
         "codex_agent_status", "codex_agent_message",
@@ -1269,13 +1704,26 @@ def list_accounts_page(limit: int = 50, offset: int = 0, archived: str | bool | 
 
 def get_account(acc_id: int) -> dict | None:
     with _LOCK:
-        row = next((r for r in _load_accounts() if int(r.get("id") or 0) == int(acc_id)), None)
+        if _sqlite_backend_enabled():
+            rows = _sqlite_query_rows("accounts", where="id=?", params=(int(acc_id),), limit=1)
+            row = rows[0] if rows else None
+        else:
+            row = next((r for r in _load_accounts() if int(r.get("id") or 0) == int(acc_id)), None)
         return _decorate_account(row) if row else None
 
 
 def get_account_by_email(email: str) -> dict | None:
     with _LOCK:
-        row = _find_by_email(_load_accounts(), email)
+        if _sqlite_backend_enabled():
+            rows = _sqlite_query_rows(
+                "accounts",
+                where="email=?",
+                params=(str(email or "").strip().lower(),),
+                limit=1,
+            )
+            row = rows[0] if rows else None
+        else:
+            row = _find_by_email(_load_accounts(), email)
         return _decorate_account(row) if row else None
 
 
@@ -1456,7 +1904,7 @@ def update_account_liveness(acc_id: int, result: dict | None = None) -> bool:
             if result.get("proxy_used"):
                 row["live_check_proxy_used"] = result.get("proxy_used")
             auth_state = result.get("auth_state")
-            if isinstance(auth_state, dict) and result.get("auth_driver") == "roxy":
+            if isinstance(auth_state, dict) and result.get("auth_driver") in {"roxy", "cloak"}:
                 auth_state = dict(auth_state)
                 previous_state = extra.get("roxy_auth_state")
                 if isinstance(previous_state, dict):
@@ -1625,6 +2073,8 @@ def archive_accounts(account_ids: list[int] | None, archived: bool = True) -> tu
 
 def count_accounts() -> int:
     with _LOCK:
+        if _sqlite_backend_enabled():
+            return _sqlite_count("accounts")
         return len(_load_accounts())
 
 
@@ -1916,15 +2366,22 @@ def list_outlook_pool(status: str | None = None, limit: int = 500) -> list[dict]
             (a.get("email") or "").lower(): a
             for a in _load_accounts()
         }
-        rows = _load_outlook()
-        if status:
-            rows = [r for r in rows if _email_pool_matches_status(r, status)]
-        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
-        return [_decorate_outlook(r, account_by_email) for r in rows[:limit]]
+        if _sqlite_backend_enabled() and status and status not in {"all", "any"}:
+            rows = _sqlite_query_rows("outlook_pool", where="status=?", params=(status,), order="id DESC", limit=limit)
+        elif _sqlite_backend_enabled():
+            rows = _sqlite_query_rows("outlook_pool", order="id DESC", limit=limit)
+        else:
+            rows = _load_outlook()
+            if status:
+                rows = [r for r in rows if _email_pool_matches_status(r, status)]
+            rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)[:limit]
+        return [_decorate_outlook(r, account_by_email) for r in rows]
 
 
 def outlook_pool_summary() -> dict:
     with _LOCK:
+        if _sqlite_backend_enabled():
+            return _sqlite_summary("outlook_pool")
         out = {"available": 0, "used": 0, "failed": 0}
         for row in _load_outlook():
             status = row.get("status") or "available"
@@ -2043,15 +2500,22 @@ def list_generic_api_email_pool(status: str | None = None, limit: int = 500) -> 
             (a.get("email") or "").lower(): a
             for a in _load_accounts()
         }
-        rows = _load_generic_api_emails()
-        if status:
-            rows = [r for r in rows if _email_pool_matches_status(r, status)]
-        rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)
-        return [_decorate_generic_api_email(r, account_by_email) for r in rows[:limit]]
+        if _sqlite_backend_enabled() and status and status not in {"all", "any"}:
+            rows = _sqlite_query_rows("generic_email_pool", where="status=?", params=(status,), order="id DESC", limit=limit)
+        elif _sqlite_backend_enabled():
+            rows = _sqlite_query_rows("generic_email_pool", order="id DESC", limit=limit)
+        else:
+            rows = _load_generic_api_emails()
+            if status:
+                rows = [r for r in rows if _email_pool_matches_status(r, status)]
+            rows = sorted(rows, key=lambda x: int(x.get("id") or 0), reverse=True)[:limit]
+        return [_decorate_generic_api_email(r, account_by_email) for r in rows]
 
 
 def generic_api_email_pool_summary() -> dict:
     with _LOCK:
+        if _sqlite_backend_enabled():
+            return _sqlite_summary("generic_email_pool")
         out = {"available": 0, "used": 0, "failed": 0}
         for row in _load_generic_api_emails():
             status = row.get("status") or "available"
@@ -2379,8 +2843,26 @@ def update_job(
 
 def list_jobs(limit: int = 100) -> list[dict]:
     with _LOCK:
+        if _sqlite_backend_enabled():
+            return _sqlite_query_rows("registration_jobs", order="id DESC", limit=max(1, int(limit)))
         rows = sorted(_load_jobs(), key=lambda x: int(x.get("id") or 0), reverse=True)
         return [dict(r) for r in rows[:limit]]
+
+
+def count_registration_failures(email: str) -> int:
+    """统计同一邮箱尚未生成账号的完整注册失败次数。"""
+    target = str(email or "").strip().lower()
+    if not target:
+        return 0
+    with _LOCK:
+        return sum(
+            1
+            for row in _load_jobs()
+            if str(row.get("email") or "").strip().lower() == target
+            and str(row.get("job_type") or "registration") == "registration"
+            and str(row.get("status") or "") == "failed"
+            and row.get("account_id") in (None, "")
+        )
 
 
 def get_job(job_id: int) -> dict | None:
@@ -2570,12 +3052,14 @@ def migrate_legacy_files() -> dict:
 
 
 def db_path() -> Path:
-    """兼容旧名称，返回当前文件存储目录。"""
-    return _DATA_DIR
+    """返回当前 SQLite 主数据库路径。"""
+    _ensure_sqlite()
+    return _SQLITE_PATH
 
 
 def storage_paths() -> dict:
     return {
+        "sqlite": str(_SQLITE_PATH),
         "outlook_json": str(_OUTLOOK_JSON),
         "outlook_txt": str(_OUTLOOK_TXT),
         "accounts_json": str(_ACCOUNTS_JSON),
@@ -2587,30 +3071,55 @@ def storage_paths() -> dict:
     }
 
 
+def export_compatibility_files(*, include_viewer: bool = True) -> dict:
+    """从 SQLite 生成旧版 JSON/TXT/HTML 文件；这些文件不再作为运行时数据源。"""
+    with _LOCK:
+        accounts = [dict(row) for row in _load_accounts()]
+        outlook = [dict(row) for row in _load_outlook()]
+        generic = [dict(row) for row in _load_generic_api_emails()]
+        jobs = [dict(row) for row in _load_jobs()]
+        domains = [dict(row) for row in _load_domain_pool()]
+        _write_json(_ACCOUNTS_JSON, accounts)
+        _write_json(_OUTLOOK_JSON, outlook)
+        _write_json(_GENERIC_API_EMAIL_JSON, generic)
+        _write_json(_JOBS_JSON, jobs)
+        _write_json(_DOMAIN_EMAIL_JSON, domains)
+        _sync_accounts_txt(accounts)
+        _sync_tokens_txt(accounts)
+        _sync_outlook_txt(outlook)
+        _sync_generic_api_email_txt(generic)
+        viewer = _render_static_viewer(outlook_rows=outlook, account_rows=accounts) if include_viewer else None
+        return {
+            "accounts": len(accounts),
+            "outlook_pool": len(outlook),
+            "generic_email_pool": len(generic),
+            "registration_jobs": len(jobs),
+            "domain_email_pool": len(domains),
+            "viewer": str(viewer) if viewer else None,
+        }
+
+
 def refresh_static_viewer() -> Path:
     """手动刷新静态查看器，返回 HTML 路径。"""
-    with _LOCK:
-        outlook_rows = _load_outlook()
-        account_rows = _load_accounts()
-        _sync_outlook_txt(outlook_rows)
-        _sync_accounts_txt(account_rows)
-        _sync_tokens_txt(account_rows)
-        return _render_static_viewer(outlook_rows=outlook_rows, account_rows=account_rows)
+    result = export_compatibility_files(include_viewer=True)
+    return Path(str(result["viewer"]))
 
 
 # ============================================================
 # Domain email pool（Cloudflare 域名邮箱跟踪）
 # ============================================================
 
-_DOMAIN_EMAIL_JSON = _PROJECT_ROOT / "用于注册的域名邮箱.json"
-
-
 def _load_domain_pool() -> list[dict]:
+    if _sqlite_backend_enabled():
+        return _sqlite_load_rows("domain_email_pool")
     rows = _read_json(_DOMAIN_EMAIL_JSON, [])
     return rows if isinstance(rows, list) else []
 
 
 def _save_domain_pool(rows: list[dict]) -> None:
+    if _sqlite_backend_enabled():
+        _sqlite_save_rows("domain_email_pool", rows)
+        return
     _write_json(_DOMAIN_EMAIL_JSON, rows)
 
 

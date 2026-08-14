@@ -39,7 +39,7 @@ _PROFILE_CREATE_FIELDS = (
 )
 _PROXY_CREATE_FIELDS = (
     "moduleId", "proxyMethod", "proxyCategory", "ipType", "protocol", "host", "port",
-    "proxyUserName", "proxyPassword", "refreshUrl", "checkChannel",
+    "proxyUserName", "proxyPassword", "refreshUrl",
 )
 
 

@@ -25,6 +25,12 @@ codex_agent_accounts
 注册日志/
 accounts_viewer.html
 
+# SQLite 主存储及迁移备份（包含完整账号凭证）
+turb_gpt.sqlite3
+turb_gpt.sqlite3-shm
+turb_gpt.sqlite3-wal
+data-backups/
+
 # Cloudflare 域名邮箱池（运行时数据）
 用于注册的域名邮箱.json
 

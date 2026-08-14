@@ -2160,6 +2160,7 @@
           <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnCheckSelectedLiveV2" onclick="checkSelectedLive()" title="重新登录选中账号；成功且未封号则标记正常，并刷新最新 AT/accessToken">查活</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnCheckSelectedPlansV2" disabled title="查询选中账号当前套餐；free 账号会检查 Plus 试用资格">查套餐</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnExtractSelectedLinksV2" disabled title="给选中的 free(可Plus试用) 账号批量提链，类型按配置 PIX/UPI/KAKAO_PAY/IDEAL">提链</button>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnExtractSelectedPaypalZeroV2" disabled title="使用本地 link-pp 批量生成 PayPal 0 元 BA 链接">PayPal 0元</button>
         </div>
         <div class="acc-v2-btn-group">
           <span class="acc-v2-btn-group-title">Agent</span>
@@ -2229,7 +2230,7 @@
       <div class="log" id="liveLogContent">加载中…</div>
     </div>
     <div class="body hidden" id="roxyReopenLogPanel">
-      <h3>Roxy 运行日志：<span id="roxyReopenLogEmail" style="font-size:13px;font-weight:400;color:var(--muted);"></span>
+      <h3>Cloak 运行日志：<span id="roxyReopenLogEmail" style="font-size:13px;font-weight:400;color:var(--muted);"></span>
         <button class="btn" id="btnCloseRoxyReopenLog" style="float:right;min-height:28px;">关闭</button>
       </h3>
       <div class="log" id="roxyReopenLogContent">加载中…</div>
@@ -2491,6 +2492,7 @@ let JOB_STATUS_COUNTS = {};
 let jobsRenderSignature = '';
 const JOB_SELECTED = new Set();
 let activeLogJob = null, logTimer = null, jobsTimer = null;
+let jobsRefreshInFlight = false, summaryRefreshInFlight = false;
 
 // ---------- 分页状态 ----------
 const PAGERS = {
@@ -2697,6 +2699,8 @@ $$('nav button').forEach(b => b.addEventListener('click', () => activateTab(b.da
 
 // ---------- 概览 ----------
 async function loadSummary() {
+  if (summaryRefreshInFlight) return;
+  summaryRefreshInFlight = true;
   try {
     const s = await api('/api/summary');
     $('#statAccounts').textContent = s.accounts;
@@ -2705,6 +2709,7 @@ async function loadSummary() {
     $('#statUsed').textContent = s.outlook_used;
     $('#statFailed').textContent = s.outlook_failed;
   } catch(e) {}
+  finally { summaryRefreshInFlight = false; }
 }
 
 // ---------- 注册 / 任务 ----------
@@ -2895,6 +2900,8 @@ function updateJobsSelectionUi(pageRows = null) {
 }
 
 async function refreshJobs() {
+  if (jobsRefreshInFlight) return;
+  jobsRefreshInFlight = true;
   try {
     const p = PAGERS.jobs;
     const res = await api(`/api/jobs?paged=1&page=${encodeURIComponent(p.page)}&page_size=${encodeURIComponent(p.size)}`);
@@ -2902,15 +2909,19 @@ async function refreshJobs() {
     JOBS_TOTAL = Number(res.total || nextJobs.length || 0);
     JOB_STATUS_COUNTS = res.status_counts || {};
     const totalPages = Math.max(1, Math.ceil(JOBS_TOTAL / p.size));
-    if (p.page > totalPages) { p.page = totalPages; return refreshJobs(); }
+    if (p.page > totalPages) {
+      p.page = totalPages;
+      jobsRefreshInFlight = false;
+      return refreshJobs();
+    }
     const nextSignature = JSON.stringify({items: nextJobs, total: JOBS_TOTAL, status_counts: JOB_STATUS_COUNTS, page: p.page, size: p.size});
     JOBS = nextJobs;
     if (nextSignature !== jobsRenderSignature) {
       jobsRenderSignature = nextSignature;
       renderJobs();
     }
-    loadSummary();
   } catch(e) {}
+  finally { jobsRefreshInFlight = false; }
 }
 
 let modalScrollY = 0;
@@ -3376,7 +3387,7 @@ function _extractLinkAction(r) {
   const eligible = plan === 'free' && !!r.plus_trial_eligible;
   if (!eligible) return '';
   const failedReason = s === 'failed' ? (r.extract_link_error || r.extract_link_message || '') : '';
-  return `<button class="good" data-extract-link="${esc(r.id)}" title="${esc(failedReason ? '重新提链；上次失败原因：' + failedReason : '为该 free(可Plus试用) 账号创建 PIX/UPI/KAKAO_PAY/IDEAL 提链任务')}">提链</button>`;
+  return `<button class="good" data-extract-link="${esc(r.id)}" title="${esc(failedReason ? '重新提链；上次失败原因：' + failedReason : '为该 free(可Plus试用) 账号创建 PIX/UPI/KAKAO_PAY/IDEAL 提链任务')}">提链</button> <button class="good" data-extract-link="${esc(r.id)}" data-link-type="paypal_zero" title="使用本地 link-pp 创建 PayPal 0 元 BA 链接，不消耗 CDK">PayPal 0元</button>`;
 }
 function _codexAction(r) {
   const s = r.codex_status || '';
@@ -3391,7 +3402,7 @@ function _tokenCellV2(r) {
   const live = r.live_check_status || '';
   const liveErr = r.live_check_error || '';
   const liveAt = r.live_checked_at || '';
-  const liveDriver = r.live_check_driver === 'roxy' ? 'Roxy' : (r.live_check_driver === 'protocol' ? '协议' : (r.live_check_driver || ''));
+  const liveDriver = r.live_check_driver === 'cloak' ? 'Cloak' : (r.live_check_driver === 'roxy' ? 'Roxy' : (r.live_check_driver === 'protocol' ? '协议' : (r.live_check_driver || '')));
   const methodLabels = {cookie:'Cookie', password:'密码', email_otp:'邮箱 OTP', email_cookie_or_existing:'已有会话'};
   const liveMethod = methodLabels[r.live_check_method] || r.live_check_method || '';
   const liveMode = [liveDriver, liveMethod].filter(Boolean).join(' / ');
@@ -3410,15 +3421,15 @@ function _tokenCellV2(r) {
   return `<span class="pill status-failed">无Token</span>${liveHtml}`;
 }
 function _accountsV2MoreMenu(r) {
-  const roxyProfileId = r.roxy_reopen_profile_id || '';
-  const roxyCloseDisabled = !roxyProfileId || r.roxy_reopen_status === 'closed';
+  const cloakProfileId = r.cloak_reopen_profile_id || '';
+  const cloakCloseDisabled = !cloakProfileId || r.cloak_reopen_status === 'closed';
   const parts = [
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
     `<button type="button" data-account-copy-secret="session_json" data-account-id="${esc(r.id)}" title="复制完整 ChatGPT /api/auth/session JSON">复制 Session JSON</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
-    `<button type="button" data-account-roxy-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 RoxyBrowser</button>`,
-    `<button type="button" class="danger" data-account-roxy-close="${esc(r.id)}"${roxyCloseDisabled ? ' disabled' : ''} title="${roxyCloseDisabled ? '当前没有账号页打开的 Roxy Profile 记录' : '关闭当前 Roxy 窗口并删除 Profile，释放窗口额度'}">关闭并释放 Roxy</button>`,
-    `<button type="button" data-account-roxy-log="${esc(r.id)}" data-account-roxy-email="${esc(r.email || '')}" title="查看该账号最近一次 RoxyBrowser 重新打开运行日志">Roxy运行日志</button>`,
+    `<button type="button" data-account-cloak-reopen="${esc(r.id)}" title="优先恢复 Cookie；Cookie 缺失或失效时自动重新执行账号登录">重新打开 CloakBrowser</button>`,
+    `<button type="button" class="danger" data-account-cloak-close="${esc(r.id)}"${cloakCloseDisabled ? ' disabled' : ''} title="${cloakCloseDisabled ? '当前没有账号页打开的 CloakBrowser' : '关闭当前 CloakBrowser 窗口'}">关闭 CloakBrowser</button>`,
+    `<button type="button" data-account-cloak-log="${esc(r.id)}" data-account-cloak-email="${esc(r.email || '')}" title="查看该账号最近一次 CloakBrowser 重新打开运行日志">Cloak运行日志</button>`,
     `<button type="button" onclick="checkSelectedLive([Number('${esc(r.id)}')], this); return false;" title="重新登录该账号，成功则刷新最新 AT/accessToken">查活刷新AT</button>`,
     `<button type="button" data-account-live-log="${esc(r.email)}" title="查看该账号最近一次查活日志">查活日志</button>`,
     _planAction(r),
@@ -3497,7 +3508,7 @@ function updateAccountSelectionUi(pageRows = null) {
   const archiveLabel = SHOW_ARCHIVED_ACCOUNTS ? '恢复选中' : '归档选中';
   const archiveTitle = SHOW_ARCHIVED_ACCOUNTS ? '把选中的归档账号恢复到默认账号列表' : '归档选中的账号；默认账号列表将不再查询/显示这些账号';
   const v2Ids = [
-    'btnCheckSelectedPlansV2', 'btnExtractSelectedLinksV2',
+    'btnCheckSelectedPlansV2', 'btnExtractSelectedLinksV2', 'btnExtractSelectedPaypalZeroV2',
     'btnGenerateSelectedAgentV2', 'btnDownloadSelectedAgentV2', 'btnUploadSelectedAgentSub2V2',
     'btnRetrySelectedCodexV2', 'btnDownloadSelectedCpaV2', 'btnStopSelectedCodexV2',
     'btnNoteSelectedAccountsV2', 'btnCopySelectedLinesV2', 'btnCopySelectedEmailsV2',
@@ -3599,7 +3610,7 @@ function openRoxyReopenLog(id, email) {
 async function pollRoxyReopenLog() {
   if (roxyReopenLogId == null) return;
   try {
-    const r = await api(`/api/accounts/${encodeURIComponent(roxyReopenLogId)}/roxy-reopen-log`);
+    const r = await api(`/api/accounts/${encodeURIComponent(roxyReopenLogId)}/cloak-reopen-log`);
     const c = $('#roxyReopenLogContent');
     const atBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 30;
     c.textContent = r.log || '(暂无日志，等待任务写入…)';
@@ -3670,20 +3681,20 @@ async function onAccountsBodyClick(e) {
     return;
   }
 
-  const roxyReopenBtn = e.target.closest('[data-account-roxy-reopen]');
+  const roxyReopenBtn = e.target.closest('[data-account-cloak-reopen]');
   if (roxyReopenBtn) {
-    const id = Number(roxyReopenBtn.dataset.accountRoxyReopen);
+    const id = Number(roxyReopenBtn.dataset.accountCloakReopen);
     const row = ACCOUNTS.find(item => Number(item.id) === id);
     openRoxyReopenLog(id, row?.email || '');
     roxyReopenBtn.disabled = true;
     const oldText = roxyReopenBtn.textContent;
     roxyReopenBtn.textContent = '正在打开…';
     try {
-      const r = await api(`/api/accounts/${encodeURIComponent(id)}/roxy-reopen`, {
+      const r = await api(`/api/accounts/${encodeURIComponent(id)}/cloak-reopen`, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
       });
       const method = r.auth_method === 'cookie' ? 'Cookie' : '重新登录';
-      showToast(`RoxyBrowser 已打开（${method}，Cookie ${r.restored_cookies || 0} 个）`);
+      showToast(`CloakBrowser 已打开（${method}，Cookie ${r.restored_cookies || 0} 个）`);
       await loadAccounts();
     } catch (err) {
       showToast('重新打开失败: ' + err.message);
@@ -3694,21 +3705,21 @@ async function onAccountsBodyClick(e) {
     return;
   }
 
-  const roxyCloseBtn = e.target.closest('[data-account-roxy-close]');
+  const roxyCloseBtn = e.target.closest('[data-account-cloak-close]');
   if (roxyCloseBtn) {
-    const id = Number(roxyCloseBtn.dataset.accountRoxyClose);
-    if (!confirm('确定关闭该账号当前打开的 RoxyBrowser，并删除 Profile 释放窗口额度吗？\n\n登录 Cookie 和环境快照会保留，下次仍可重新创建并自动登录。')) return;
+    const id = Number(roxyCloseBtn.dataset.accountCloakClose);
+    if (!confirm('确定关闭该账号当前打开的 CloakBrowser 吗？\n\n登录 Cookie 会保留，下次仍可重新打开并自动登录。')) return;
     roxyCloseBtn.disabled = true;
     const oldText = roxyCloseBtn.textContent;
     roxyCloseBtn.textContent = '正在关闭…';
     try {
-      const r = await api(`/api/accounts/${encodeURIComponent(id)}/roxy-close`, {
+      const r = await api(`/api/accounts/${encodeURIComponent(id)}/cloak-close`, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
       });
-      showToast(r.already_released ? '该账号没有待释放的 Roxy 窗口' : 'RoxyBrowser 已关闭，Profile 已删除并释放');
+      showToast(r.already_closed ? '该账号没有待关闭的 CloakBrowser' : 'CloakBrowser 已关闭');
       await loadAccounts();
     } catch (err) {
-      showToast('关闭 RoxyBrowser 失败: ' + err.message);
+      showToast('关闭 CloakBrowser 失败: ' + err.message);
     } finally {
       roxyCloseBtn.disabled = false;
       roxyCloseBtn.textContent = oldText;
@@ -3716,11 +3727,11 @@ async function onAccountsBodyClick(e) {
     return;
   }
 
-  const roxyLogBtn = e.target.closest('[data-account-roxy-log]');
+  const roxyLogBtn = e.target.closest('[data-account-cloak-log]');
   if (roxyLogBtn) {
     openRoxyReopenLog(
-      Number(roxyLogBtn.dataset.accountRoxyLog),
-      roxyLogBtn.dataset.accountRoxyEmail || '',
+      Number(roxyLogBtn.dataset.accountCloakLog),
+      roxyLogBtn.dataset.accountCloakEmail || '',
     );
     return;
   }
@@ -3745,7 +3756,7 @@ async function onAccountsBodyClick(e) {
 
   const extractBtn = e.target.closest('[data-extract-link]');
   if (extractBtn) {
-    await extractOneLink(Number(extractBtn.dataset.extractLink), extractBtn);
+    await extractOneLink(Number(extractBtn.dataset.extractLink), extractBtn, extractBtn.dataset.linkType || '');
     return;
   }
 
@@ -4199,7 +4210,7 @@ async function checkOnePlan(id, btn) {
   }
 }
 
-async function extractOneLink(id, btn) {
+async function extractOneLink(id, btn, linkType = '') {
   const acc = ACCOUNTS.find(a => Number(a.id) === Number(id));
   if (!acc) { showToast('账号不存在'); return; }
   const plan = (acc.current_plan_type || acc.plan_type || '').toString().toLowerCase();
@@ -4207,7 +4218,9 @@ async function extractOneLink(id, btn) {
     showToast('仅支持 free(可Plus试用) 账号提链');
     return;
   }
-  if (!confirm(`确定为该账号提链吗？\n\n${acc.email || ('#' + id)}\n\n提链类型按配置使用 PIX/UPI/KAKAO_PAY/IDEAL，成功会消耗 1 次 CDK。`)) return;
+  const paypalZero = linkType === 'paypal_zero';
+  const detail = paypalZero ? '使用本地 link-pp 和 PayPal 专用巴西代理池，不消耗 CDK。' : '提链类型按配置使用 PIX/UPI/KAKAO_PAY/IDEAL，成功会消耗 1 次 CDK。';
+  if (!confirm(`确定为该账号${paypalZero ? '生成 PayPal 0 元链接' : '提链'}吗？\n\n${acc.email || ('#' + id)}\n\n${detail}`)) return;
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = '提链中…';
@@ -4215,7 +4228,7 @@ async function extractOneLink(id, btn) {
     await api('/api/accounts/extract-link', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({account_id: id}),
+      body: JSON.stringify({account_id: id, ...(linkType ? {link_type: linkType} : {})}),
     });
     showToast('提链任务已入队');
     await pollAccountPlanStatuses();
@@ -4226,14 +4239,16 @@ async function extractOneLink(id, btn) {
   }
 }
 
-async function extractSelectedLinks() {
+async function extractSelectedLinks(linkType = '') {
   const ids = Array.from(ACCOUNT_SELECTED);
   if (ids.length === 0) { showToast('请先选择账号'); return; }
   const selected = ids.map(id => ACCOUNTS.find(a => Number(a.id) === Number(id))).filter(Boolean);
   const eligible = selected.filter(a => (a.current_plan_type || a.plan_type || '').toString().toLowerCase() === 'free' && !!a.plus_trial_eligible);
   if (!eligible.length) { showToast('选中账号里没有 free(可Plus试用)'); return; }
-  if (!confirm(`确定批量提链 ${eligible.length} 个 free(可Plus试用) 账号吗？\n\n非可试用账号会自动跳过。成功会按账号消耗 CDK 次数。`)) return;
-  const btn = $('#btnExtractSelectedLinksV2');
+  const paypalZero = linkType === 'paypal_zero';
+  const detail = paypalZero ? '使用本地 link-pp 和 PayPal 专用巴西代理池，不消耗 CDK。' : '成功会按账号消耗 CDK 次数。';
+  if (!confirm(`确定批量${paypalZero ? '生成 PayPal 0 元链接' : '提链'} ${eligible.length} 个 free(可Plus试用) 账号吗？\n\n非可试用账号会自动跳过。${detail}`)) return;
+  const btn = paypalZero ? $('#btnExtractSelectedPaypalZeroV2') : $('#btnExtractSelectedLinksV2');
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = '提链中…';
@@ -4241,7 +4256,7 @@ async function extractSelectedLinks() {
     const r = await api('/api/accounts/extract-link-bulk', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({account_ids: ids}),
+      body: JSON.stringify({account_ids: ids, ...(linkType ? {link_type: linkType} : {})}),
     });
     const skipped = (r.skipped_count || 0) + (r.busy_count || 0) + (r.failed_count || 0);
     showToast(skipped ? `已入队 ${r.started_count || 0} 个，跳过/失败 ${skipped} 个` : `已入队 ${r.started_count || 0} 个`);
@@ -4709,7 +4724,8 @@ async function copySelectedAccountTokens() {
     if (el) el.addEventListener('click', fn);
   };
   bind('btnCheckSelectedPlansV2', checkSelectedPlans);
-  bind('btnExtractSelectedLinksV2', extractSelectedLinks);
+  bind('btnExtractSelectedLinksV2', () => extractSelectedLinks(''));
+  bind('btnExtractSelectedPaypalZeroV2', () => extractSelectedLinks('paypal_zero'));
   bind('btnGenerateSelectedAgentV2', generateSelectedCodexAgents);
   bind('btnDownloadSelectedAgentV2', downloadSelectedCodexAgents);
   bind('btnUploadSelectedAgentSub2V2', uploadSelectedCodexAgentSub2);
@@ -5759,8 +5775,7 @@ function renderConfigSectionHead(name, meta = '') {
 function registrationDriverChoices() {
   return [
     { value: 'protocol', label: '纯协议注册' },
-    { value: 'roxy', label: 'RoxyBrowser' },
-    { value: 'cloak', label: '本地指纹浏览器' },
+    { value: 'cloak', label: 'CloakBrowser（默认）' },
     { value: 'browser_use', label: 'browser_use' },
     { value: 'skyvern', label: 'skyvern' },
   ];
@@ -5920,8 +5935,7 @@ function renderMixedConfigSectionV2(name, fields, intro) {
 function codexOauthDriverChoices() {
   return [
     { value: 'protocol', label: '纯协议授权' },
-    { value: 'roxy', label: 'RoxyBrowser' },
-    { value: 'cloak', label: '本地指纹浏览器' },
+    { value: 'cloak', label: 'CloakBrowser（默认）' },
     { value: 'browser_use', label: 'browser_use' },
     { value: 'skyvern', label: 'skyvern' },
     { value: 'same_as_registration', label: '跟随注册驱动' },

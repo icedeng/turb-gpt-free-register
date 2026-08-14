@@ -1,0 +1,30 @@
+services:
+  link-pp:
+    build:
+      context: ../vendor/link-pp
+    image: turb-gpt-link-pp:latest
+    container_name: turb-gpt-link-pp
+    restart: unless-stopped
+    init: true
+    environment:
+      HANDOFF_DIAGNOSTIC_DIR: /data/diagnostics
+    ports:
+      - "127.0.0.1:5572:5572"
+    volumes:
+      - link-pp-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    stop_grace_period: 35s
+
+volumes:
+  link-pp-data:

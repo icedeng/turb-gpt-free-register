@@ -32,7 +32,7 @@ ChatGPT / OpenAI 账号自动注册与 Codex OAuth 授权工具。当前项目�
 - 支持 RoxyBrowser 一号一环境：自动创建、打开、关闭、删除 Roxy Profile。
 - 支持 Roxy 无头启动：`ROXY_OPEN_HEADLESS=True`。
 - 支持 Windows Roxy + Linux WebUI 分机部署：通过 `ROXY_WEBDRIVER_URL` 连接 Windows ChromeDriver Supervisor。
-- 已注册账号查活默认使用临时 Roxy Profile：优先恢复 Cookie，失效时回退密码/邮箱 OTP，完成后自动关闭并删除环境；可用 `ACCOUNT_LIVENESS_DRIVER=protocol` 兼容旧协议模式。
+- 已注册账号查活默认使用临时 CloakBrowser 环境：优先恢复 Cookie，失效时回退密码/邮箱 OTP，完成后自动关闭；可用 `ACCOUNT_LIVENESS_DRIVER=protocol` 兼容旧协议模式。
 - 支持 CloakBrowser：免费 binary、无头模式、humanize、固定 fingerprint seed、按出口 IP 自动匹配语言/时区/WebRTC。
 - Roxy / Cloak 浏览器注册已兼容：
   - 填邮箱后直接进入邮箱验证码页；
@@ -68,7 +68,7 @@ EMAIL_SOURCE = "outlook,generic_api"
   - `CODEX_OAUTH_DRIVER = "cloak"`
   - `CODEX_OAUTH_DRIVER = "browser_use"`
   - `CODEX_OAUTH_DRIVER = "same_as_registration"`
-- 默认值为 `CODEX_OAUTH_DRIVER = "roxy"`；选择 Roxy 时若浏览器依赖不可用会明确失败，不会静默降级到协议授权。
+- 默认值为 `CODEX_OAUTH_DRIVER = "cloak"`；CloakBrowser 依赖不可用时会明确失败，不会静默降级到协议授权。
 - 支持 CPA 管理接口生成授权 URL，并提交 OAuth callback。
 - 支持接码平台：
   - GrizzlySMS
@@ -375,7 +375,7 @@ PROXY_POOL = [
 ]
 ```
 
-代理池也支持不带协议的简写，每行一个代理；无协议时会自动按 SOCKS5 处理：
+代理池也支持不带协议的简写，每行一个代理；无协议时会自动按 HTTP 处理：
 
 ```text
 user:pass@hostname:port
@@ -384,7 +384,7 @@ hostname:port:username:password
 hostname:port@username:password
 ```
 
-无协议格式默认按 SOCKS5 处理；`http://`、`socks5://`、`socks5h://` 可加在任意一种格式前面，用于明确代理协议。
+无协议格式默认按 HTTP 处理；`http://`、`socks5://`、`socks5h://` 可加在任意一种格式前面，用于明确代理协议。
 
 Roxy 一号一环境使用独立的 `ROXY_PROXY_POOL`。在 WebUI「配置 → RoxyBrowser」填写专用代理池并开启
 `ROXY_CREATE_USE_PROXY_POOL=True` 后，每次新建 Roxy Profile 都会从专用池随机取代理；不会读取本节的通用 `PROXY_POOL`。
@@ -608,10 +608,58 @@ WebUI 配置页保存后会调用热加载；Roxy、Codex、邮箱、代理、�
 
 ---
 
+## PayPal 0 元提链（link-pp）
+
+项目通过 Git 子模块（Git submodule）固定 `link-pp` 上游版本，并将其作为仅监听本机
+`127.0.0.1:5572` 的独立 Docker 服务运行。主项目只保留 API 适配层，因此不会复制、
+修改上游源码，也不会影响原有 PIX/UPI/KAKAO_PAY/IDEAL 提链。
+
+首次克隆或已有仓库初始化：
+
+```bash
+git clone --recurse-submodules <repository-url>
+git submodule update --init --recursive
+```
+
+启动服务并验证：
+
+```bash
+docker compose -f deploy/link-pp.compose.yaml up -d --build
+curl http://127.0.0.1:5572/api/meta
+```
+
+在 WebUI「配置 → 提链」填写专用巴西出口代理池，或配置 `.env`：
+
+```env
+PAYPAL_ZERO_API_BASE="http://127.0.0.1:5572"
+PAYPAL_ZERO_PROXY_POOL="http://user:password@br-proxy.example:8080"
+PAYPAL_ZERO_PROXY_SCHEME="http"
+PAYPAL_ZERO_PROXY_COUNTRY="BR"
+PAYPAL_ZERO_CHECKOUT_ATTEMPTS="5"
+PAYPAL_ZERO_PROVIDER_ATTEMPTS="10"
+```
+
+该代理池只用于 PayPal 0 元提链，不读取注册或 Roxy 代理池；裸代理按
+`PAYPAL_ZERO_PROXY_SCHEME` 补协议。账号页点击「PayPal 0元」即可创建任务，成功后复制
+PayPal BA approve URL，不消耗原提链 CDK。
+
+跟随上游更新并重建服务：
+
+```bash
+tools/update_link_pp.sh --rebuild
+git add vendor/link-pp
+git commit -m "chore: update link-pp submodule"
+```
+
+更新脚本只移动子模块版本指针，不会自动提交，便于先验证再纳入主项目版本。
+
+---
+
 ## 数据与产物
 
 | 路径 | 内容 |
 |---|---|
+| `turb_gpt.sqlite3` | SQLite 主存储：账号、注册任务及邮箱池；启用 WAL 模式 |
 | `用于注册的邮箱.txt/json` | Outlook 邮箱池及状态 |
 | `用于注册的API邮箱.txt/json` | 通用 API 邮箱池及状态 |
 | `注册成功的邮箱.txt/json` | 注册成功账号 |
@@ -621,6 +669,23 @@ WebUI 配置页保存后会调用热加载；Roxy、Codex、邮箱、代理、�
 | `注册任务.json` | WebUI 注册任务表 |
 | `注册日志/` | 注册任务日志、Codex 补跑日志 |
 | `accounts_viewer.html` | 本地账号查看页 |
+
+账号、注册任务、Outlook/API/域名邮箱池以 `turb_gpt.sqlite3` 为唯一运行时数据源。
+首次启动会自动从现有 JSON 幂等导入；原 JSON 文件保留为迁移前备份，不再随每次状态更新重写。
+需要重新生成旧版 JSON/TXT/HTML 兼容文件时执行：
+
+```bash
+python tools/migrate_to_sqlite.py --export
+```
+
+手动初始化并在迁移前备份原 JSON：
+
+```bash
+python tools/migrate_to_sqlite.py --backup
+```
+
+备份保存在 `data-backups/pre-sqlite-*`。Codex 凭证仍保留在 `codex_accounts/*.json`，
+以兼容 CPA 与 codex2api 导入格式。
 
 批次目录示例：
 
@@ -809,6 +874,7 @@ ROXY_OPEN_HEADLESS = False
 - [browser-use](https://github.com/browser-use/browser-use) — Browser Use Cloud / Playwright CDP 云端浏览器能力支持
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — Codex OAuth 凭证格式参考
 - [curl_cffi](https://github.com/yifeikong/curl_cffi) — 底层 HTTP 库，提供 TLS 指纹 impersonate 能力
+- [link-pp](https://github.com/eatWhitePorridge/link-pp) — PayPal 0 元 BA 提链服务
 
 ---
 

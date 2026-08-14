@@ -16,7 +16,7 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_DIR = _PROJECT_ROOT / "config"
-EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL", "ROXY_PROXY_POOL"}
+EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL", "ROXY_PROXY_POOL", "PAYPAL_ZERO_PROXY_POOL"}
 
 
 # ============================================================
@@ -47,7 +47,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "REGISTRATION_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "注册方式",
-        "label": "注册驱动", "help": "默认推荐 roxy；protocol=纯协议，容易封号不建议；roxy=RoxyBrowser；cloak=CloakBrowser；browser_use=Browser Use Cloud+Playwright；skyvern=Skyvern Browser Sessions+Playwright",
+        "label": "注册驱动", "help": "默认推荐 cloak；protocol=纯协议；roxy=RoxyBrowser；cloak=CloakBrowser；browser_use=Browser Use Cloud+Playwright；skyvern=Skyvern Browser Sessions+Playwright",
     },
     {
         "key": "AUTO_PLAN_CHECK_AFTER_REGISTER", "file": "register.py", "type": "bool", "group": "注册方式",
@@ -228,7 +228,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "ACCOUNT_LIVENESS_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "账号认证",
-        "label": "账号查活驱动", "help": "roxy=临时 Roxy Profile 登录；protocol=兼容旧协议登录；same_as_registration=跟随注册驱动",
+        "label": "账号查活驱动", "help": "cloak=临时 CloakBrowser 环境登录；protocol=兼容旧协议登录；same_as_registration=跟随注册驱动",
     },
     {
         "key": "ROXY_LIVE_CHECK_HEADLESS", "file": "roxybrowser.py", "type": "bool", "group": "账号认证",
@@ -292,7 +292,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "CODEX_OAUTH_DRIVER", "file": "codex.py", "type": "str", "group": "Codex",
-        "label": "Codex授权驱动", "help": "默认推荐 roxy；protocol=原协议授权；roxy=用 RoxyBrowser；cloak=用 CloakBrowser；browser_use=用 Browser Use Cloud；skyvern=用 Skyvern；same_as_registration=跟随注册驱动",
+        "label": "Codex授权驱动", "help": "默认推荐 cloak；protocol=原协议授权；roxy=用 RoxyBrowser；cloak=用 CloakBrowser；browser_use=用 Browser Use Cloud；skyvern=用 Skyvern；same_as_registration=跟随注册驱动",
     },
     {
         "key": "ROXY_CODEX_CALLBACK_TIMEOUT", "file": "roxybrowser.py", "type": "int", "group": "RoxyBrowser",
@@ -330,6 +330,10 @@ EDITABLE_FIELDS = [
     {
         "key": "REGISTER_NAME", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
         "label": "显示名称", "help": "留空则自动生成英文名",
+    },
+    {
+        "key": "REGISTRATION_EMAIL_MAX_FAILURES", "file": "register.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "邮箱注册失败上限", "help": "同一邮箱完整注册失败达到该次数后自动停用，不再从邮箱池领取；默认 3 次",
     },
     {
         "key": "OTP_MAX_WAIT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
@@ -474,7 +478,7 @@ EDITABLE_FIELDS = [
     # ---- 代理池 ----
     {
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "支持 socks5:// 或 http:// + username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 socks5://",
+        "label": "代理池(每行一个)", "help": "支持 http:// 或 socks5:// + username:password@hostname:port、username:password:hostname:port、hostname:port:username:password、hostname:port@username:password；无协议时自动补充 http://",
     },
     {
         "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",
@@ -529,7 +533,31 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "EXTRACT_LINK_TYPE", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链类型", "help": "支持 pix / upi / kakao_pay / ideal",
+        "label": "提链类型", "help": "支持 pix / upi / kakao_pay / ideal / paypal_zero；paypal_zero 使用本地 link-pp 且不需要 CDK",
+    },
+    {
+        "key": "PAYPAL_ZERO_API_BASE", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "PayPal 0元服务地址", "help": "link-pp 本机 API，默认 http://127.0.0.1:5572",
+    },
+    {
+        "key": "PAYPAL_ZERO_PROXY_POOL", "file": "extract_link.py", "type": "list_str_multiline", "group": "提链",
+        "label": "PayPal巴西代理池(每行一个)", "help": "仅供 PayPal 0 元提链使用；要求出口国家为 BR，不复用通用注册代理池",
+    },
+    {
+        "key": "PAYPAL_ZERO_PROXY_SCHEME", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "PayPal代理默认协议", "help": "裸代理格式使用的协议，建议 http；也可填 socks5 / socks5h / https",
+    },
+    {
+        "key": "PAYPAL_ZERO_PROXY_COUNTRY", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "PayPal代理国家", "help": "link-pp 当前流程要求 BR；账单自动使用 DE/EUR",
+    },
+    {
+        "key": "PAYPAL_ZERO_CHECKOUT_ATTEMPTS", "file": "extract_link.py", "type": "int", "group": "提链",
+        "label": "PayPal Checkout次数", "help": "单账号最多重新创建 Checkout 的次数，默认 5",
+    },
+    {
+        "key": "PAYPAL_ZERO_PROVIDER_ATTEMPTS", "file": "extract_link.py", "type": "int", "group": "提链",
+        "label": "PayPal提链次数", "help": "每个 Checkout 最多更换代理提取 PayPal 链接的次数，默认 10",
     },
     {
         "key": "EXTRACT_LINK_WORKERS", "file": "extract_link.py", "type": "int", "group": "提链",

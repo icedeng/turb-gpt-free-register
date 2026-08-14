@@ -14,19 +14,19 @@ class ProxyUtilsTests(unittest.TestCase):
         cases = [
             (
                 "user:pass@proxy.example:1080",
-                "socks5://user:pass@proxy.example:1080",
+                "http://user:pass@proxy.example:1080",
             ),
             (
                 "proxy.example:1080:user:pass",
-                "socks5://user:pass@proxy.example:1080",
+                "http://user:pass@proxy.example:1080",
             ),
             (
                 "user:pass:proxy.example:1080",
-                "socks5://user:pass@proxy.example:1080",
+                "http://user:pass@proxy.example:1080",
             ),
             (
                 "proxy.example:1080@user:pass",
-                "socks5://user:pass@proxy.example:1080",
+                "http://user:pass@proxy.example:1080",
             ),
             (
                 "http://user:pass@proxy.example:8080",
@@ -58,7 +58,7 @@ class ProxyUtilsTests(unittest.TestCase):
 
     def test_roxy_proxy_info_accepts_username_first_shorthand(self):
         info = _proxy_url_to_roxy_info("user:pass@proxy.example:1080")
-        self.assertEqual(info["protocol"], "SOCKS5")
+        self.assertEqual(info["protocol"], "HTTP")
         self.assertEqual(info["host"], "proxy.example")
         self.assertEqual(info["port"], "1080")
         self.assertEqual(info["proxyUserName"], "user")
@@ -84,6 +84,26 @@ class ProxyUtilsTests(unittest.TestCase):
         self.assertEqual(profile_id, "new-profile")
         self.assertEqual(captured["body"]["proxyInfo"]["host"], "new.proxy")
         self.assertEqual(captured["body"]["proxyInfo"]["protocol"], "HTTP")
+
+    def test_reopen_snapshot_does_not_reuse_roxy_check_channel(self):
+        from core import roxy_reopen
+
+        account = {
+            "extra_json": {
+                "roxybrowser": {
+                    "profile_detail": {
+                        "proxyInfo": {
+                            "host": "proxy.example",
+                            "port": "8080",
+                            "protocol": "HTTP",
+                            "checkChannel": "legacy-invalid-channel",
+                        }
+                    }
+                }
+            }
+        }
+        payload = roxy_reopen._profile_recreate_payload(account)
+        self.assertNotIn("checkChannel", payload["proxyInfo"])
 
     def test_roxy_create_fails_when_dedicated_pool_is_enabled_but_empty(self):
         client = RoxyBrowserClient()

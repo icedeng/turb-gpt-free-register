@@ -95,6 +95,10 @@ def run_cloak_registration(email: str, name: str, birthday: str, proxy: str = No
         session_info = _fetch_chatgpt_session(driver, timeout=120)
         access_token = session_info["accessToken"]
         logger.info("[Cloak注册] 已拿到 accessToken：%s", email)
+        from core.roxy_reopen import capture_auth_state
+        cloak_auth_state = capture_auth_state(driver)
+        if not cloak_auth_state.get("cookies"):
+            logger.warning("[Cloak注册] 未抓取到可恢复的 Cookie；后续查活将自动重新登录")
 
         if _twofa_cfg.ENABLE_2FA:
             logger.warning("[Cloak注册] 当前 CloakBrowser 自动化路径暂不执行 2FA 设置，已跳过")
@@ -138,6 +142,8 @@ def run_cloak_registration(email: str, name: str, birthday: str, proxy: str = No
                 "account": session_info.get("account"),
                 "expires": session_info.get("expires"),
                 "cloakbrowser": {"profile_id": opened.profile_id, "open_result": opened.raw},
+                # 沿用兼容字段名，旧 Roxy 账号的 Cookie/Storage 也能直接迁移到 Cloak。
+                "roxy_auth_state": cloak_auth_state,
                 "registration_password": openai_password,
                 "codex": codex_result,
             },

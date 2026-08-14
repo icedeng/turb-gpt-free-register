@@ -229,6 +229,26 @@ class CloakSeleniumDriver:
             logger.debug("[Cloak] CDP 命令失败 %s: %s", cmd, exc)
             return None
 
+    def get_cookies(self) -> list[dict]:
+        try:
+            return list(self.context.cookies()) if self.context is not None else []
+        except Exception:
+            return []
+
+    def add_cookie(self, cookie: dict) -> None:
+        if self.context is None:
+            raise RuntimeError("CloakBrowser context 不可用，无法恢复 Cookie")
+        allowed = {"name", "value", "url", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
+        item = {key: value for key, value in dict(cookie or {}).items() if key in allowed}
+        same_site = str(item.get("sameSite") or "").strip().lower()
+        if same_site:
+            item["sameSite"] = {"lax": "Lax", "strict": "Strict", "none": "None"}.get(same_site, item.get("sameSite"))
+        self.context.add_cookies([item])
+
+    def delete_all_cookies(self) -> None:
+        if self.context is not None:
+            self.context.clear_cookies()
+
     def _serialize_args(self, args: tuple[Any, ...]) -> tuple[CloakElement | None, list[Any]]:
         """拆分 Selenium 脚本参数。
 

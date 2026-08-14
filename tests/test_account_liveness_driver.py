@@ -27,6 +27,22 @@ class AccountLivenessDriverTests(unittest.TestCase):
              patch.object(roxybrowser, "REGISTRATION_DRIVER", "protocol"):
             self.assertEqual(account_liveness._account_liveness_driver(), "protocol")
 
+    def test_cloak_driver_receives_complete_account_snapshot(self):
+        import core.cloak_account_session as cloak_account_session
+
+        account = {"id": 13, "email": "cloak@example.com", "extra_json": '{"registration_password":"secret"}'}
+        result = {"ok": True, "status": "live", "access_token": "token", "auth_driver": "cloak"}
+        with tempfile.TemporaryDirectory() as tmp:
+            log_file = Path(tmp) / "live.log"
+            with patch.object(account_liveness, "log_path", return_value=log_file), \
+                 patch.object(account_liveness, "_account_liveness_driver", return_value="cloak"), \
+                 patch.object(cloak_account_session, "check_account_in_cloak", return_value=result) as check:
+                output = account_liveness.check_account_liveness(account["email"], proxy="", account=account)
+
+        check.assert_called_once_with(account, proxy="")
+        self.assertTrue(output["ok"])
+        self.assertEqual(output["auth_driver"], "cloak")
+
     def test_roxy_driver_receives_complete_account_snapshot(self):
         account = {
             "id": 12,

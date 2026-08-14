@@ -1,0 +1,4 @@
+[submodule "vendor/link-pp"]
+	path = vendor/link-pp
+	url = https://github.com/eatWhitePorridge/link-pp.git
+	branch = main
