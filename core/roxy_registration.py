@@ -19,6 +19,10 @@ from core.roxybrowser_client import RoxyBrowserClient, RoxyOpenResult
 logger = logging.getLogger(__name__)
 
 
+def _is_roxy_quota_error(error: object) -> bool:
+    return "窗口单日创建次数已经超出" in str(error or "")
+
+
 def _log_prefix(driver=None) -> str:
     """按当前浏览器实现返回注册日志前缀。
 
@@ -1990,12 +1994,13 @@ def _check_manual_stop() -> None:
 def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = None, otp_code: str = None, batch_dir: Path | None = None) -> dict:
     """Roxy 指纹浏览器自动化注册入口。"""
     client = RoxyBrowserClient()
-    opened = client.open_profile()
+    opened: RoxyOpenResult | None = None
     driver = None
     create_acknowledged = False
     openai_password: str | None = None
     roxy_profile_detail: dict = {}
     try:
+        opened = client.open_profile()
         try:
             roxy_profile_detail = client.get_profile_detail(opened.profile_id)
             logger.info("[Roxy注册] 已保存 Profile 完整环境配置：fields=%s", len(roxy_profile_detail))
@@ -2195,7 +2200,12 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
         # 未确认创建前回收邮箱；确认后避免重复使用。
         try:
             from core.email_provider import release_email
-            release_email(email, status="failed" if create_acknowledged else "available", note=f"Roxy注册失败: {str(exc)[:180]}")
+            quota_error = _is_roxy_quota_error(exc)
+            email_status = "available" if quota_error or not create_acknowledged else "failed"
+            note_prefix = "Roxy额度超限，邮箱未失败" if quota_error else "Roxy注册失败"
+            release_email(email, status=email_status, note=f"{note_prefix}: {str(exc)[:180]}")
+            if quota_error:
+                logger.warning("[Roxy注册] 每日创建额度超限，错误已记录，邮箱保持 available：%s", email)
         except Exception:
             pass
         return {"success": False, "email": email, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
@@ -2205,5 +2215,5 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
                 driver.quit()
             except Exception:
                 pass
-        if not bool(_cfg.ROXY_KEEP_BROWSER_OPEN):
+        if opened is not None and not bool(_cfg.ROXY_KEEP_BROWSER_OPEN):
             client.cleanup_profile(opened)
